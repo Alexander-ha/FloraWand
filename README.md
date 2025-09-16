@@ -1,4 +1,6 @@
-##Bot for FLORAWAND magic wand to care about your plants!##
+** Bot for FLORAWAND magic wand to care about your plants! **
+=========
+
 
 Consists of aiogram3 python bot, sqlite3 async implementation, main purpose is the personalization of user's experience.
 
