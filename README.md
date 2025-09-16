@@ -1,4 +1,4 @@
-** Bot for FLORAWAND magic wand to care about your plants! **
+**Bot for FLORAWAND magic wand to care about your plants!**
 =========
 
 
