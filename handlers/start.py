@@ -1,43 +1,32 @@
-from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.context import FSMContext
+from aiogram import Router
+from aiogram.filters import Command
 import aiosqlite
 import logging
-import asyncio
 from typing import Optional
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from aiogram import types
 import matplotlib.pyplot as plt
 import pandas as pd
-from datetime import datetime
+from datetime import timedelta
 from io import BytesIO
+import matplotlib.dates as mdates
 
 from create_bot import bot, dp
+
 logger = logging.getLogger(__name__)
-
-# class UserForm(StatesGroup):
-#     waiting_for_flower = State()
-#     waiting_for_water = State()
-#     waiting_for_temp = State()
-#     waiting_for_light = State()
-
 start_router = Router()
-
-# Глобальная переменная для хранения соединения с базой данных
+user_quiz_state = {}
 db_connection = None
 
 async def init_db():
-    """Инициализация базы данных"""
     global db_connection
     if db_connection is None:
         db_connection = await aiosqlite.connect('flowers.db')
         await db_connection.execute('PRAGMA journal_mode=WAL')
         await db_connection.execute('PRAGMA busy_timeout=5000')
 
-        # Создаем таблицу если она не существует
+
         await db_connection.execute('''
             CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -57,7 +46,7 @@ async def init_db():
         )
         ''')
         await db_connection.execute('''
-            CREATE TABLE IF NOT EXISTS plants_monitor (
+            CREATE TABLE IF NOT EXISTS plants_monitor_final (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 plant_id INTEGER NOT NULL,
@@ -67,13 +56,23 @@ async def init_db():
                 measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        #  -- Add indexes for better query performance
         await db_connection.execute('''
-            CREATE INDEX IF NOT EXISTS idx_monitor_user_plant ON plants_monitor(user_id, plant_id)
+            CREATE INDEX IF NOT EXISTS idx_monitor_user_plant ON plants_monitor_final (user_id, plant_id)
         ''')
         await db_connection.execute('''
-            CREATE INDEX IF NOT EXISTS idx_monitor_timestamp ON plants_monitor(measured_at)            
+            CREATE INDEX IF NOT EXISTS idx_monitor_timestamp ON plants_monitor_final (measured_at)            
         ''')
+        # care_description = [
+        #     "\n🌱 Dieffenbachia — a decorative tropical plant with large variegated leaves in green and cream patterns.\n👉 Keep it in bright, indirect light, water regularly, and avoid cold drafts.",
+        #     "\n🌵 Cactus — a slow-growing succulent with spines that stores water in its stem.\n👉 Keep it in bright sunlight and water only when the soil is completely dry.",
+        #     "\n🌿 Ficus — an evergreen tree with elegant drooping branches and glossy leaves.\n👉 Place it in bright, indirect light and avoid sudden changes in conditions to prevent leaf drop.",
+        #     "\n🍃 Monstera — a tropical climbing plant with large leaves featuring iconic splits and holes.\n👉 Water moderately and provide partial shade to protect it from direct sunburn.",
+        #     "\n🌸 Orchid — a delicate orchid known as the “dancing lady” for its clusters of small, fluttering flowers.\n👉 Give it bright, filtered light, water when the top of the potting mix is dry, and ensure good air circulation."]
+        # for i, plant in enumerate(care_description):
+        #     query = f'''
+        #         UPDATE plants_info SET care_description = ? WHERE plant_id = ?
+        #     '''
+        #     await db_connection.execute(query, (plant, i+1))
         await db_connection.commit()
         logger.info("Database initiated.")
 
@@ -129,6 +128,9 @@ async def fetch_one(query, params=None):
     except Exception as e:
         logger.error(f"Error fetching data: {e}")
         raise
+
+# $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+# DATABASE QUERIES
 
 async def add_user(user_id: int, username: str = None):
     """Добавление нового пользователя"""
@@ -207,7 +209,35 @@ async def get_all_plants(): #  -> List[Dict[str, Any]]
         plants = await cursor.fetchall()
         return [dict(plant) for plant in plants]
 
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+async def get_plant_stats_from_db(user_id: int, plant_id: int, cnt: int=-1):
+    try:
+        async with aiosqlite.connect('flowers.db') as db:
+            query = """
+                SELECT water_lvl, temp_lvl, light_lvl, humidity_lvl, measured_at
+                FROM plants_monitor_final
+                WHERE plant_id = ? AND user_id = ?
+                ORDER BY measured_at
+            """
+            if cnt > 0:
+                query += f"DESC LIMIT {cnt}" # !!!!!!! выдает самую старую запись пока, надо самую новую
+            cursor = await db.execute(query, (plant_id, user_id))  
+            rows = await cursor.fetchall()
+            if not rows:
+                return None
+            df = pd.DataFrame(rows, columns=['water_lvl', 'temp_lvl', 'light_lvl', 'humidity_lvl', 'measured_at'])
+            df['measured_at'] = pd.to_datetime(df['measured_at'])
+            df.set_index('measured_at', inplace=True)
+            
+            # Убеждаемся, что индекс имеет правильный тип
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index)
+            return df
+    except Exception as e:
+        print(f"Error fetching plant stats: {e}")
+        return None
+
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# MENU FUNCTIONS
 
 def get_main_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -254,31 +284,28 @@ async def get_add_plant_menu() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 def get_plant_actions_menu(user_id: int, plant_id: int = None) -> InlineKeyboardMarkup:
-    """
-    Компактное меню с действиями для растения (2 кнопки в ряду)
-    """
     builder = InlineKeyboardBuilder()
-    
-    # Первый ряд: две кнопки показателей
     builder.row(
         InlineKeyboardButton(
-            text="📊 All time measurements", 
+            text="📊 Dashboard", 
             callback_data=f"stats_all_{user_id}_{plant_id}" if plant_id else "stats_all"
         ),
         InlineKeyboardButton(
-            text="📈 Right now measurements", 
+            text="📈 Current state", 
             callback_data=f"stats_now_{user_id}_{plant_id}" if plant_id else "stats_now"
         )
     )
-    # Второй ряд: уход
     builder.row(
         InlineKeyboardButton(
             text="🌱 Care description", 
             callback_data=f"care_info_{plant_id}" if plant_id else "care_info"
         )
     )
-    # Третий ряд: главное меню
     builder.row(
+        InlineKeyboardButton(
+            text="⬅️ Back to my plants", 
+            callback_data="my_plants"
+        ),
         InlineKeyboardButton(
             text="⬅️ Back to Main Menu", 
             callback_data="main_menu"
@@ -286,7 +313,163 @@ def get_plant_actions_menu(user_id: int, plant_id: int = None) -> InlineKeyboard
     )
     return builder.as_markup()
 
-# Обработчики команд
+def get_time_range_menu(user_id: int, plant_id: int) -> InlineKeyboardMarkup:
+    """
+    Создает меню для выбора временного диапазона графиков
+    """
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="📊 24 hours", callback_data=f"graph_24h_{user_id}_{plant_id}"),
+        InlineKeyboardButton(text="📈 7 days", callback_data=f"graph_7d_{user_id}_{plant_id}"),
+        InlineKeyboardButton(text="📅 30 days", callback_data=f"graph_30d_{user_id}_{plant_id}")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="🕰️ All time", callback_data=f"graph_all_{user_id}_{plant_id}"),
+        InlineKeyboardButton(text="🌿 Auto", callback_data=f"graph_auto_{user_id}_{plant_id}")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="⬅️ Back to options", callback_data=f"plant_detail_{plant_id}")
+    )
+    
+    return builder.as_markup()
+
+# ***************************************************************************************************************************************************************************************************************************************
+# STATISTICS HANDLERS
+def format_datetime_axis(ax, timestamps: pd.Series, rotation: int = 45):
+    if timestamps.empty:
+        return
+    
+    time_range = timestamps.max() - timestamps.min()
+    
+    if time_range <= timedelta(hours=12):
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))
+    elif time_range <= timedelta(days=1):
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
+    elif time_range <= timedelta(days=7):
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m %H:%M'))
+        ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+    elif time_range <= timedelta(days=30):
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m'))
+        ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
+    elif time_range <= timedelta(days=90):
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m'))
+        ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
+    else:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+    
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=rotation, ha='right')
+
+async def create_time_range_graph(callback: types.CallbackQuery, user_id: int, plant_id: int, time_range: str = 'auto') -> Optional[BytesIO]:
+    """
+    Создает график для определенного временного диапазона
+    
+    Args:
+        time_range: '24h', '7d', '30d', 'all', 'auto'
+    """
+    try:
+        df = await get_plant_stats_from_db(user_id, plant_id)
+        
+        if df is None or df.empty:
+            await callback.message.answer("📊 No statistics data available for this period.")
+            return 
+        
+        # Фильтруем данные по временному диапазону
+        now = pd.Timestamp.now()
+        
+        if time_range == '24h':
+            filtered_df = df[df.index >= now - timedelta(hours=24)]
+            title_suffix = ' (24 hours)'
+        elif time_range == '7d':
+            filtered_df = df[df.index >= now - timedelta(days=7)]
+            title_suffix = ' (7 days)'
+        elif time_range == '30d':
+            filtered_df = df[df.index >= now - timedelta(days=30)]
+            title_suffix = ' (30 days)'
+        else:
+            filtered_df = df
+            title_suffix = ' (all time)'
+        
+        if filtered_df.empty:
+            return None
+        
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 10))
+        fig.suptitle(f'Plant Statistics{title_suffix}', fontsize=16)
+        
+        ax1.plot(filtered_df.index, filtered_df['temp_lvl'], marker='o', color="red", linewidth=3)
+        ax1.set_title('Temperature')
+        ax1.set_ylabel('°C')
+        ax1.grid(True, alpha=0.3)
+        
+        ax2.plot(filtered_df.index, filtered_df['water_lvl'], marker='o', color="blue", linewidth=3)
+        ax2.set_title('Soil moisture')
+        ax2.set_ylabel('%')
+        ax2.grid(True, alpha=0.3)
+        
+        ax3.plot(filtered_df.index, filtered_df['light_lvl'], marker='o', color="orange", linewidth=3)
+        ax3.set_title('Light')
+        ax3.set_ylabel('Lux')
+        ax3.grid(True, alpha=0.3)
+        
+        ax4.plot(filtered_df.index, filtered_df['humidity_lvl'], marker='o', color="gray", linewidth=3)
+        ax4.set_title('Air humidity')
+        ax4.set_ylabel('%')
+        ax4.grid(True, alpha=0.3)
+    
+        
+        format_datetime_axis(ax1, pd.Series(filtered_df.index))
+        format_datetime_axis(ax2, pd.Series(filtered_df.index))
+        format_datetime_axis(ax3, pd.Series(filtered_df.index))
+        format_datetime_axis(ax4, pd.Series(filtered_df.index))
+        
+        plt.tight_layout()
+
+        buf = BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        buf.seek(0)
+        plt.close()
+
+        await bot.send_photo(
+        chat_id=callback.message.chat.id,
+        photo=BufferedInputFile(buf.getvalue(), filename='plant_stats.png'),
+        caption="📊 Detailed plant statistics"
+    )
+        
+    except Exception as e:
+        print(f"Error creating time range graph: {e}")
+        return None
+
+
+async def show_current_stats(callback: types.CallbackQuery, user_id: int, plant_id: int):
+    plant = await get_plant_by_id(plant_id)
+    df = await get_plant_stats_from_db(user_id, plant_id, cnt=1)
+
+    if df is None or df.empty:
+        await callback.message.answer("📊 No statistics data available for this plant.")
+        return 
+    
+    stats_text = f"""
+        📈 Current state of your {plant['plant_name']}:
+            • Soil moisture level: {df['water_lvl'].values[0]}%
+            • Temperature: {df['temp_lvl'].values[0]}°C
+            • Sunlight: {df['light_lvl'].values[0]} lux
+            • Humidity: {df['humidity_lvl'].values[0]} %
+        """
+    return stats_text
+
+async def show_care_info(plant_id: int):
+    plant = await get_plant_by_id(plant_id)
+    care_text = f"{plant['care_description']}\n\n\t💧 gather watering info and give advice\n☀️ gather watering info and give advice\n🌡️ gather watering info and give advice"
+    return care_text
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# COMMAND HANDLERS
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user = message.from_user
@@ -311,137 +494,31 @@ async def cmd_menu(message: types.Message):
     if user_id in user_quiz_state:
         del user_quiz_state[user_id]
     await message.answer("Main menu:", reply_markup=get_main_menu())
-
-
-
-
-
-# Примеры функций-заглушек для обработки действий
-async def show_all_time_stats(callback: types.CallbackQuery, user_id: int, plant_id: int):
-    """Показать показатели за все время"""
-    plant = await get_plant_by_id(plant_id)
-    chat_id = callback.message.chat.id
-
-    # Получаем данные из БД 
-    stats_data = await get_plant_stats_from_db(user_id, plant_id)
-
-    # Создаем фигуру с несколькими subplots
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
-    fig.suptitle(f'🌿 Plant Statistics\n{plant["plant_name"]}', fontsize=16)
     
-    # График температуры
-    ax1.plot(stats_data['measured_at'], stats_data['temp_lvl'], 'r-o', linewidth=2)
-    ax1.set_title('🌡️ Temperature')
-    ax1.set_ylabel('°C')
-    ax1.grid(True, alpha=0.3)
-    ax1.tick_params(axis='x', rotation=45)
-    
-    # График влажности
-    ax2.plot(stats_data['measured_at'], stats_data['water_lvl'], 'b-s', linewidth=2)
-    ax2.set_title('💧 Humidity')
-    ax2.set_ylabel('%')
-    ax2.grid(True, alpha=0.3)
-    ax2.tick_params(axis='x', rotation=45)
-    
-    # График освещенности
-    ax3.bar(stats_data['measured_at'], stats_data['light_level'], color='orange', alpha=0.7)
-    ax3.set_title('☀️ Light Level')
-    ax3.set_ylabel('Lux')
-    ax3.grid(True, alpha=0.3)
-    ax3.tick_params(axis='x', rotation=45)
-    
-    # График полива
-    # ax4.scatter(stats_data['watering_dates'], 
-    #            [1] * len(stats_data['watering_dates']), 
-    #            color='blue', s=100)
-    # ax4.set_title('🚰 Watering Events')
-    # ax4.set_yticks([])
-    # ax4.tick_params(axis='x', rotation=45)
-    
-    plt.tight_layout()
-    
-    # Сохраняем и отправляем
-    buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    plt.close()
-    
-    await bot.send_photo(
-        chat_id=chat_id,
-        photo=BufferedInputFile(buf.getvalue(), filename='plant_stats.png'),
-        caption="📊 Detailed plant statistics"
-    )
-    
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# CALLBACK QUERIES HANDLERS
 
-async def get_plant_stats_from_db(user_id: int, plant_id: int):
-    query = """
-        SELECT 
-            measured_at,
-            temp_lvl,
-            humidity_lvl,
-            light_lvl,
-            water_lvl
-        FROM plants_monitor 
-        WHERE plant_id = ? AND user_id = ?
-        ORDER BY measured_at ASC
-        """
-    # add AND measured_at >= ? to WHERE to collect data from a certain timestamp
-    df = pd.read_sql_query(query, db_connection, params=(user_id, plant_id))
-    return df 
-
-
-async def show_current_stats(callback: types.CallbackQuery, user_id: int, plant_id: int):
-    """Показать текущие показатели"""
-    plant = await get_plant_by_id(plant_id)
-    stats_text = f"""
-        📈 Current state of your {plant['plant_name']}:
-
-        • Temperature: {plant['temp_lvl']}°C
-        • Soil moisture level: {plant['water_lvl']}%
-        • Sunlight: {plant['light_lvl']} lux
-        • Overall state: Excellent 🌟
-        """
-    return stats_text
-
-async def show_care_info(callback: types.CallbackQuery, plant_id: int):
-    """Показать информацию об уходе"""
-    plant = await get_plant_by_id(plant_id)
-    care_text = f"""
-        🌱 Уход за {plant['plant_name']}:
-
-        {plant['care_instructions']}
-
-        💧 gather watering info and give advice
-        ☀️ gather watering info and give advice
-        🌡️ gather watering info and give advice
-        """
-    return care_text
-
-
-# Обработчик callback запросов
 @dp.callback_query()
 async def handle_callback(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     data = callback.data
-    
     if data == "main_menu":
         await callback.message.answer("Main menu:", reply_markup=get_main_menu())
-        await callback.answer()
+        # await callback.answer()
     
     elif data == "my_plants":
         plants = await get_user_plants(user_id)
         if plants:
-            plants_list = "\n".join([f"🌱 {plant['plant_name']}" for plant in plants])
-            text = f"Your plants:\n{plants_list}"
+            text = f"Your plants:\n"
         else:
             text = "You don't have any plants yet. Add some from the main menu!"
         
         await callback.message.answer(text, reply_markup=await get_user_plants_menu(user_id))
-        await callback.answer()
+        # await callback.answer()
     
     elif data == "add_plant_menu":
         await callback.message.answer("Choose a plant to add:", reply_markup=await get_add_plant_menu())
-        await callback.answer()
+        # await callback.answer()
     
     elif data.startswith("add_plant_"):
         plant_id = int(data.split("_")[2])
@@ -450,7 +527,7 @@ async def handle_callback(callback: types.CallbackQuery):
             await callback.message.answer("Plant added successfully! ✅ 🌿")
         else:
             await callback.message.answer("This plant is already in your collection! ⚠️")
-        await callback.answer()
+        # await callback.answer()
     
     elif data.startswith("plant_detail_"):
         plant_id = int(data.split("_")[2])
@@ -459,29 +536,30 @@ async def handle_callback(callback: types.CallbackQuery):
             await callback.message.answer("Here are your options: ", reply_markup=get_plant_actions_menu(user_id, plant_id))
         else:
             await callback.message.answer("Plant not found")
-        await callback.answer()
+        # await callback.answer()
 
     elif data.startswith("stats_all_"):
         plant_id = int(data.split("_")[3])
-        await show_all_time_stats(callback, user_id, plant_id)
-        await callback.answer(reply_markup=get_plant_actions_menu(user_id, plant_id))
+        # await show_all_time_stats(callback, user_id, plant_id)
+        await callback.message.answer("Select time period", reply_markup=get_time_range_menu(user_id, plant_id))
+        # await callback.answer()
 
     elif data.startswith("stats_now_"):
         plant_id = int(data.split("_")[3])
         stats_text = await show_current_stats(callback, user_id, plant_id)
         await callback.message.answer(stats_text, reply_markup=get_plant_actions_menu(user_id, plant_id))
-        await callback.answer()
+        # await callback.answer()
 
     elif data.startswith("care_info_"):
         plant_id = int(data.split("_")[2])
-        care_text = await show_care_info(callback, plant_id)
+        care_text = await show_care_info(plant_id)
         await callback.message.answer(care_text, reply_markup=get_plant_actions_menu(user_id, plant_id))
-        await callback.answer()
+        # await callback.answer()
 
     elif data == "start_quiz":
         user_quiz_state[user_id] = {'current_question': 0, 'score': 0}
         await ask_quiz_question(callback.message, user_id)
-        await callback.answer()
+        # await callback.answer()
     
     elif data.startswith("quiz_answer_"):
         if user_id not in user_quiz_state:
@@ -501,10 +579,16 @@ async def handle_callback(callback: types.CallbackQuery):
                 await ask_quiz_question(callback.message, user_id)
             else:
                 await show_quiz_results(callback.message, user_id)
-        
-        await callback.answer()
 
-# Функции квиза
+    elif  data.startswith("graph_"):
+        plant_id = int(data.split("_")[3])
+        await create_time_range_graph(callback, user_id, plant_id, data.split("_")[1])
+        await callback.message.answer("Other time period?", reply_markup=get_time_range_menu(user_id, plant_id))
+
+    await callback.answer()
+
+# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+# QUIZ HANDLERS
 async def ask_quiz_question(message: types.Message, user_id: int):
     current_state = user_quiz_state[user_id]
     question_index = current_state['current_question']
@@ -524,20 +608,17 @@ async def ask_quiz_question(message: types.Message, user_id: int):
 async def show_quiz_results(message: types.Message, user_id: int):
     score = user_quiz_state[user_id]['score']
     
-    recommendation = ("Snake Plant", "неприхотливое растение")
+    recommendation = ("Cactus", "low-maintenance")
     for score_range, rec in PLANT_RECOMMENDATIONS.items():
         if score_range[0] <= score <= score_range[1]:
             recommendation = rec
             break
-    
+    plant = await get_plant_by_name(recommendation[0])
     text = f"""
         🎉 Quiz Completed!
 
-        Your score: {score}/9
-
-        🌿 Recommended plant for you:
-        {' - '.join(recommendation)}
-
+        🌿 Recommended plant for you: {' - '.join(recommendation)}
+        {plant['care_description']}
         Would you like to add this plant to your collection?
     """
     rec_plant = await get_plant_by_name(recommendation[0])
@@ -552,10 +633,6 @@ async def show_quiz_results(message: types.Message, user_id: int):
     if user_id in user_quiz_state:
         del user_quiz_state[user_id]
 
-
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-# Quiz questions and answers
 QUIZ_QUESTIONS = [
     {
         'question': 'How often can you water your plants?',
@@ -580,4 +657,7 @@ PLANT_RECOMMENDATIONS = {
     (7, 9): ('Monstera', 'high-maintenance')
 }
 
-user_quiz_state = {}
+
+
+
+
