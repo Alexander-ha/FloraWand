@@ -1,0 +1,4 @@
+*.db-shm
+*.db-wal
+*.env
+*.databases
