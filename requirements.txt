@@ -1,5 +1,7 @@
 aiogram==3.22.0
 aiosqlite==0.21.0
 APScheduler==3.11.0
-python-decouple==3.8
 Flask==3.1.2
+matplotlib==3.10.6
+pandas==2.3.2
+python-decouple==3.8
