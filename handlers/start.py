@@ -450,10 +450,9 @@ async def show_current_stats(callback: types.CallbackQuery, user_id: int, plant_
     df = await get_plant_stats_from_db(user_id, plant_id, cnt=1)
 
     if df is None or df.empty:
-        await callback.message.answer("📊 No statistics data available for this plant.")
-        return 
-    
-    stats_text = f"""
+        stats_text = "📊 No statistics data available for this plant."
+    else:
+        stats_text = f"""
         📈 Current state of your {plant['plant_name']}:
             • Soil moisture level: {df['water_lvl'].values[0]}%
             • Temperature: {df['temp_lvl'].values[0]}°C
