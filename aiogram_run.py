@@ -13,6 +13,7 @@ def index():
 @app_flask.route("/data", methods=['POST'])
 def receive_data():
     try:
+        macadress = request.form.get('MacAdress')
         temperature = request.form.get('temperature')
         humidity = request.form.get('humidity')
         heat_index = request.form.get('heat_index')
@@ -20,7 +21,7 @@ def receive_data():
         lux2 = request.form.get('lux2')
         mst = request.form.get('moisture')
         
-        print(f"Received data: Temp={temperature}, Hum={humidity}, HI={heat_index}, Lux1={lux1}, Lux2={lux2}, moisture={mst}")
+        print(f"Received data: Address: {macadress}, Temp={temperature}, Hum={humidity}, HI={heat_index}, Lux1={lux1}, Lux2={lux2}, moisture={mst}")
         return "Data received successfully", 200
     except Exception as e:
         print(f"Error receiving data: {e}")
