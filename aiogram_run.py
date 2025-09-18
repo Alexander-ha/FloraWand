@@ -18,8 +18,9 @@ def receive_data():
         heat_index = request.form.get('heat_index')
         lux1 = request.form.get('lux1')
         lux2 = request.form.get('lux2')
+        mst = request.form.get('moisture')
         
-        print(f"Received data: Temp={temperature}, Hum={humidity}, HI={heat_index}, Lux1={lux1}, Lux2={lux2}")
+        print(f"Received data: Temp={temperature}, Hum={humidity}, HI={heat_index}, Lux1={lux1}, Lux2={lux2}, moisture={mst}")
         return "Data received successfully", 200
     except Exception as e:
         print(f"Error receiving data: {e}")
