@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import timedelta
 from io import BytesIO
+import re
 import matplotlib.dates as mdates
 
 from create_bot import bot, dp
@@ -57,11 +58,26 @@ async def init_db():
             )
         ''')
         await db_connection.execute('''
+            CREATE TABLE IF NOT EXISTS users_wands (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                plant_id INTEGER,
+                wand_id TEXT NOT NULL,
+                registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (user_id),
+                FOREIGN KEY (plant_id) REFERENCES plants_info_new (plant_id)
+            )
+        ''')
+        await db_connection.execute('''
             CREATE INDEX IF NOT EXISTS idx_monitor_user_plant ON plants_monitor_final (user_id, plant_id)
         ''')
         await db_connection.execute('''
             CREATE INDEX IF NOT EXISTS idx_monitor_timestamp ON plants_monitor_final (measured_at)            
         ''')
+        await db_connection.execute('''
+            CREATE INDEX IF NOT EXISTS idx_wand_id ON users_wands (wand_id)
+        ''')
+
         # care_description = [
         #     "\n🌱 Dieffenbachia — a decorative tropical plant with large variegated leaves in green and cream patterns.\n👉 Keep it in bright, indirect light, water regularly, and avoid cold drafts.",
         #     "\n🌵 Cactus — a slow-growing succulent with spines that stores water in its stem.\n👉 Keep it in bright sunlight and water only when the soil is completely dry.",
@@ -70,11 +86,12 @@ async def init_db():
         #     "\n🌸 Orchid — a delicate orchid known as the “dancing lady” for its clusters of small, fluttering flowers.\n👉 Give it bright, filtered light, water when the top of the potting mix is dry, and ensure good air circulation."]
         # for i, plant in enumerate(care_description):
         #     query = f'''
-        #         UPDATE plants_info SET care_description = ? WHERE plant_id = ?
+        #         UPDATE plants_info_new SET care_description = ? WHERE plant_id = ?
         #     '''
         #     await db_connection.execute(query, (plant, i+1))
         await db_connection.commit()
         logger.info("Database initiated.")
+
 
 async def close_db():
     """Closing connection to database..."""
@@ -83,6 +100,55 @@ async def close_db():
         await db_connection.close()
         db_connection = None
         logger.info("Connection closed.")
+
+async def register_user_wand(user_id: int, wand_id: str, plant_id: int = None):
+    """Регистрация новой палочки для пользователя"""
+    if not is_valid_mac_address(wand_id):
+        raise ValueError("Invalid MAC address format")
+    
+    async with aiosqlite.connect('flowers.db') as db:
+        try:
+            cursor = await db.execute(
+                "SELECT 1 FROM users_wands WHERE user_id = ? AND wand_id = ?",
+                (user_id, wand_id)
+            )
+            existing = await cursor.fetchone()
+            
+            if existing:
+                await db.execute(
+                    "UPDATE users_wands SET plant_id = ? WHERE user_id = ? AND wand_id = ?",
+                    (plant_id, user_id, wand_id)
+                )
+            else:
+                await db.execute('''
+                    INSERT INTO users_wands (user_id, plant_id, wand_id)
+                    VALUES (?, ?, ?)
+                ''', (user_id, plant_id, wand_id))
+            
+            await db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error registering wand: {e}")
+            return False
+
+async def get_wand_users(wand_id: str):
+    """Получение всех пользователей, связанных с палочкой"""
+    async with aiosqlite.connect('flowers.db') as db:
+        cursor = await db.execute(
+            "SELECT user_id, plant_id FROM users_wands WHERE wand_id = ?", 
+            (wand_id,)
+        )
+        return await cursor.fetchall()
+
+async def get_wand_owner(wand_id: str):
+    """Получение владельца палочки по её ID"""
+    async with aiosqlite.connect('flowers.db') as db:
+        cursor = await db.execute(
+            "SELECT user_id, plant_id FROM users_wands WHERE wand_id = ?", 
+            (wand_id,)
+        )
+        result = await cursor.fetchone()
+        return result if result else (None, None)
 
 @start_router.startup()
 async def on_startup():
@@ -93,6 +159,11 @@ async def on_startup():
 async def on_shutdown():
     """Cleaning up before closing..."""
     await close_db()
+
+def is_valid_mac_address(mac_address: str) -> bool:
+    """Проверяет, является ли строка валидным MAC-адресом"""
+    pattern = r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+    return re.match(pattern, mac_address) is not None
 
 async def execute_query(query, params=None):
     """Executing query...х"""
@@ -110,6 +181,20 @@ async def execute_query(query, params=None):
     except Exception as e:
         logger.error(f"Error executing query: {e}")
         raise
+
+async def get_user_wands(user_id: int):
+    """Получение всех палочек пользователя"""
+    async with aiosqlite.connect('flowers.db') as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('''
+            SELECT uw.wand_id, uw.plant_id, uw.registered_at, 
+                   COALESCE(pin.plant_name, 'Not linked') as plant_name
+            FROM users_wands uw
+            LEFT JOIN plants_info_new pin ON uw.plant_id = pin.plant_id
+            WHERE uw.user_id = ?
+        ''', (user_id,))
+        wands = await cursor.fetchall()
+        return [dict(wand) for wand in wands]
 
 async def fetch_one(query, params=None):
     """Fetching from database..."""
@@ -167,7 +252,7 @@ async def get_user_plants(user_id: int):
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
             SELECT p.*, up.added_at 
-            FROM plants_info p
+            FROM plants_info_new p
             JOIN user_plants up ON p.plant_id = up.plant_id
             WHERE up.user_id = ?
             ORDER BY up.added_at DESC
@@ -179,7 +264,7 @@ async def get_plant_by_name(plant_name: str):
     async with aiosqlite.connect('flowers.db') as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
-            SELECT * FROM plants_info WHERE LOWER(plant_name) = LOWER(?)
+            SELECT * FROM plants_info_new WHERE LOWER(plant_name) = LOWER(?)
         ''', (plant_name,))
         plant = await cursor.fetchone()
         return dict(plant) if plant else None
@@ -189,7 +274,7 @@ async def get_plant_by_id(plant_id: int):
     async with aiosqlite.connect('flowers.db') as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
-            SELECT * FROM plants_info WHERE LOWER(plant_id) = LOWER(?)
+            SELECT * FROM plants_info_new WHERE LOWER(plant_id) = LOWER(?)
         ''', (plant_id,))
         return await cursor.fetchone()
 
@@ -198,14 +283,14 @@ async def search_plants_by_name(plant_name: str):
     async with aiosqlite.connect('flowers.db') as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
-            SELECT * FROM plants_info WHERE LOWER(plant_name) LIKE LOWER(?)
+            SELECT * FROM plants_info_new WHERE LOWER(plant_name) LIKE LOWER(?)
         ''', (f'%{plant_name}%',))
         return await cursor.fetchall()
     
 async def get_all_plants(): #  -> List[Dict[str, Any]]
     async with aiosqlite.connect('flowers.db') as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute('SELECT plant_id, plant_name FROM plants_info')
+        cursor = await db.execute('SELECT plant_id, plant_name FROM plants_info_new')
         plants = await cursor.fetchall()
         return [dict(plant) for plant in plants]
 
@@ -239,15 +324,26 @@ async def get_plant_stats_from_db(user_id: int, plant_id: int, cnt: int=-1):
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # MENU FUNCTIONS
 
-def get_main_menu() -> InlineKeyboardMarkup:
+def get_main_menu(has_wand: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
-        InlineKeyboardButton(text="❓ What plant am I?", callback_data="start_quiz")
-    )
-    builder.row(
-        InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu")
-    )
+    
+    if has_wand:
+        builder.row(
+            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
+            InlineKeyboardButton(text="❓ What plant am I?", callback_data="start_quiz")
+        )
+        builder.row(
+            InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu"),
+            InlineKeyboardButton(text="📋 My Wands", callback_data="my_wands")
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(text="🪄 Register Wand", callback_data="register_wand_info")
+        )
+        builder.row(
+            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
+            InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu")
+        )
     return builder.as_markup()
 
 async def get_user_plants_menu(user_id: int) -> InlineKeyboardMarkup:
@@ -376,7 +472,7 @@ async def create_time_range_graph(callback: types.CallbackQuery, user_id: int, p
         df = await get_plant_stats_from_db(user_id, plant_id)
         
         if df is None or df.empty:
-            await callback.message.answer("📊 No statistics data available for this period.")
+            await callback.message.answer("📊 No statistics data available for this period.", parse_mode=None)
             return 
         
         # Фильтруем данные по временному диапазону
@@ -444,6 +540,14 @@ async def create_time_range_graph(callback: types.CallbackQuery, user_id: int, p
         print(f"Error creating time range graph: {e}")
         return None
 
+async def user_has_wand(user_id: int) -> bool:
+    """Проверка наличия палочек у пользователя"""
+    async with aiosqlite.connect('flowers.db') as db:
+        cursor = await db.execute(
+            'SELECT 1 FROM users_wands WHERE user_id = ?', 
+            (user_id,)
+        )
+        return await cursor.fetchone() is not None
 
 async def show_current_stats(callback: types.CallbackQuery, user_id: int, plant_id: int):
     plant = await get_plant_by_id(plant_id)
@@ -473,6 +577,7 @@ async def show_care_info(plant_id: int):
 async def cmd_start(message: types.Message):
     user = message.from_user
     await add_user(user.id, user.username)
+    has_wand = await user_has_wand(user.id)
     
     welcome_text = f"""
     🌿 Welcome to Flora Wand Bot, {user.first_name}!
@@ -482,17 +587,43 @@ async def cmd_start(message: types.Message):
     • Monitor water, light, humidity and room temperature levels
     • Get care instructions
     • Find the perfect plant for you
-
-    Choose an option from the menu below:
     """
-    await message.answer(welcome_text, reply_markup=get_main_menu())
+    
+    if not has_wand:
+        welcome_text += "\n\n⚠️ Please register your wand first to access all features!"
+    
+    await message.answer(welcome_text, reply_markup=get_main_menu(has_wand), parse_mode=None)
 
+@dp.message(Command("remove_wand"))
+async def cmd_remove_wand(message: types.Message):
+    """Удаление палочки у пользователя"""
+    user_id = message.from_user.id
+    parts = message.text.split()
+    
+    if len(parts) < 2:
+        await message.answer(
+            "Please specify the wand ID to remove.\n\n"
+            "Usage: /remove_wand <wand_id>"
+        )
+        return
+    
+    wand_id = parts[1]
+    
+    async with aiosqlite.connect('flowers.db') as db:
+        await db.execute(
+            "DELETE FROM users_wands WHERE user_id = ? AND wand_id = ?",
+            (user_id, wand_id)
+        )
+        await db.commit()
+    
+    await message.answer(f"Wand {wand_id} successfully removed from your account.")
+    
 @dp.message(Command("menu"))
 async def cmd_menu(message: types.Message):
     user_id = message.from_user.id
     if user_id in user_quiz_state:
         del user_quiz_state[user_id]
-    await message.answer("Main menu:", reply_markup=get_main_menu())
+    await message.answer("Main menu:", reply_markup=get_main_menu(await user_has_wand(user_id)), parse_mode=None)
     
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 # CALLBACK QUERIES HANDLERS
@@ -502,7 +633,7 @@ async def handle_callback(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     data = callback.data
     if data == "main_menu":
-        await callback.message.answer("Main menu:", reply_markup=get_main_menu())
+        await callback.message.answer("Main menu:", reply_markup=get_main_menu(await user_has_wand(user_id)), parse_mode=None)
         # await callback.answer()
     
     elif data == "my_plants":
@@ -512,47 +643,47 @@ async def handle_callback(callback: types.CallbackQuery):
         else:
             text = "You don't have any plants yet. Add some from the main menu!"
         
-        await callback.message.answer(text, reply_markup=await get_user_plants_menu(user_id))
+        await callback.message.answer(text, reply_markup=await get_user_plants_menu(user_id), parse_mode=None)
         # await callback.answer()
     
     elif data == "add_plant_menu":
-        await callback.message.answer("Choose a plant to add:", reply_markup=await get_add_plant_menu())
+        await callback.message.answer("Choose a plant to add:", reply_markup=await get_add_plant_menu(), parse_mode=None)
         # await callback.answer()
     
     elif data.startswith("add_plant_"):
         plant_id = int(data.split("_")[2])
         success = await add_plant_to_user(user_id, plant_id)
         if success:
-            await callback.message.answer("Plant added successfully! ✅ 🌿")
+            await callback.message.answer("Plant added successfully! ✅ 🌿", parse_mode=None)
         else:
-            await callback.message.answer("This plant is already in your collection! ⚠️")
+            await callback.message.answer("This plant is already in your collection! ⚠️", parse_mode=None)
         # await callback.answer()
     
     elif data.startswith("plant_detail_"):
         plant_id = int(data.split("_")[2])
         plant = await get_plant_by_id(plant_id)
         if plant:
-            await callback.message.answer("Here are your options: ", reply_markup=get_plant_actions_menu(user_id, plant_id))
+            await callback.message.answer("Here are your options: ", reply_markup=get_plant_actions_menu(user_id, plant_id), parse_mode=None)
         else:
-            await callback.message.answer("Plant not found")
+            await callback.message.answer("Plant not found", parse_mode=None)
         # await callback.answer()
 
     elif data.startswith("stats_all_"):
         plant_id = int(data.split("_")[3])
         # await show_all_time_stats(callback, user_id, plant_id)
-        await callback.message.answer("Select time period", reply_markup=get_time_range_menu(user_id, plant_id))
+        await callback.message.answer("Select time period", reply_markup=get_time_range_menu(user_id, plant_id), parse_mode=None)
         # await callback.answer()
 
     elif data.startswith("stats_now_"):
         plant_id = int(data.split("_")[3])
         stats_text = await show_current_stats(callback, user_id, plant_id)
-        await callback.message.answer(stats_text, reply_markup=get_plant_actions_menu(user_id, plant_id))
+        await callback.message.answer(stats_text, reply_markup=get_plant_actions_menu(user_id, plant_id), parse_mode=None)
         # await callback.answer()
 
     elif data.startswith("care_info_"):
         plant_id = int(data.split("_")[2])
         care_text = await show_care_info(plant_id)
-        await callback.message.answer(care_text, reply_markup=get_plant_actions_menu(user_id, plant_id))
+        await callback.message.answer(care_text, reply_markup=get_plant_actions_menu(user_id, plant_id), parse_mode=None)
         # await callback.answer()
 
     elif data == "start_quiz":
@@ -582,9 +713,163 @@ async def handle_callback(callback: types.CallbackQuery):
     elif  data.startswith("graph_"):
         plant_id = int(data.split("_")[3])
         await create_time_range_graph(callback, user_id, plant_id, data.split("_")[1])
-        await callback.message.answer("Other time period?", reply_markup=get_time_range_menu(user_id, plant_id))
+        await callback.message.answer("Other time period?", reply_markup=get_time_range_menu(user_id, plant_id), parse_mode=None)
 
+    elif data == "register_wand_info":
+        user_plants = await get_user_plants(user_id)
+        plants_text = "To register a wand, use the command:\n/register_wand wand_id plant_id\n\n"
+        plants_text += "Your plants:\n"
+        for plant in user_plants:
+            plants_text += f"ID {plant['plant_id']} - {plant['plant_name']}\n"
+            
+        await callback.message.answer(plants_text, parse_mode=None)
+                
+    elif data == "my_wands":
+        wands = await get_user_wands(user_id)
+        if not wands:
+            await callback.message.answer("You don't have any registered wands.", parse_mode=None)
+        else:
+            wands_text = "Your registered wands:\n\n"
+            for wand in wands:
+                registered_date = wand['registered_at'].split()[0]
+                wands_text += (
+                    f"• Wand: {wand['wand_id']}\n"
+                    f"  Plant: {wand['plant_name']} (ID: {wand['plant_id']})\n"
+                    f"  Registered: {registered_date}\n\n"
+                )
+            await callback.message.answer(wands_text, parse_mode=None)
     await callback.answer()
+
+@dp.message(Command("register_wand"))
+async def cmd_register_wand(message: types.Message):
+    """Обработчик команды регистрации новой палочки"""
+    user_id = message.from_user.id
+    parts = message.text.split()
+    
+    if len(parts) < 2:
+        await message.answer(
+            "Please specify the wand ID after the command.\n\n"
+            "Usage: /register_wand <wand_id> [plant_id]\n\n"
+            "You can optionally specify a plant ID to link the wand to a specific plant.", 
+            parse_mode=None
+        )
+        return
+    
+    wand_id = parts[1]
+    
+    # Проверяем формат MAC-адреса
+    if not is_valid_mac_address(wand_id):
+        await message.answer(
+            "Invalid MAC address format. Please use format like: 30:83:98:B2:D4:0D\n"
+            "The MAC address should contain 6 pairs of hex digits separated by colons or hyphens.",
+            parse_mode=None
+        )
+        return
+    
+    plant_id = None
+    
+    if len(parts) >= 3:
+        try:
+            plant_id = int(parts[2])
+            user_plants = await get_user_plants(user_id)
+            user_plant_ids = [plant['plant_id'] for plant in user_plants]
+            if plant_id not in user_plant_ids:
+                await message.answer(
+                    "The specified plant is not in your collection. "
+                    "Registering wand without plant association.",
+                    parse_mode=None
+                )
+                plant_id = None
+        except ValueError:
+            await message.answer(
+                "Invalid plant ID. Registering wand without plant association.",
+                parse_mode=None
+            )
+            plant_id = None
+    
+    try:
+        success = await register_user_wand(user_id, wand_id, plant_id)
+        if success:
+            if plant_id:
+                plant = await get_plant_by_id(plant_id)
+                await message.answer(
+                    f"✅ Wand {wand_id} successfully registered for '{plant['plant_name']}'!",
+                    parse_mode=None
+                )
+            else:
+                await message.answer(
+                    f"✅ Wand {wand_id} successfully registered! "
+                    "You can link it to a plant later using /link_wand command.",
+                    parse_mode=None
+                )
+            await message.answer("Main menu:", reply_markup=get_main_menu(True), parse_mode=None)
+        else:
+            await message.answer("❌ Error registering the wand.", parse_mode=None)
+    except ValueError as e:
+        await message.answer(str(e), parse_mode=None)
+
+@dp.message(Command("link_wand"))
+async def cmd_link_wand(message: types.Message):
+    """Привязка палочки к растению"""
+    user_id = message.from_user.id
+    parts = message.text.split()
+    
+    if len(parts) < 3:
+        await message.answer(
+            "Please specify both wand ID and plant ID.\n\n"
+            "Usage: /link_wand <wand_id> <plant_id>"
+        )
+        return
+    wand_id = parts[1]
+    try:
+        plant_id = int(parts[2])
+    except ValueError:
+        await message.answer("Invalid plant ID. Please specify a numeric plant ID.")
+        return
+    wand_owner = await get_wand_owner(wand_id)
+    if not wand_owner or wand_owner[0] != user_id:
+        await message.answer("This wand is not registered to your account.")
+        return
+    user_plants = await get_user_plants(user_id)
+    user_plant_ids = [plant['plant_id'] for plant in user_plants]
+    if plant_id not in user_plant_ids:
+        await message.answer("The specified plant is not in your collection.")
+        return
+    async with aiosqlite.connect('flowers.db') as db:
+        await db.execute(
+            "UPDATE users_wands SET plant_id = ? WHERE wand_id = ? AND user_id = ?",
+            (plant_id, wand_id, user_id)
+        )
+        await db.commit()
+    
+    plant = await get_plant_by_id(plant_id)
+    await message.answer(
+        f"✅ Wand {wand_id} successfully linked to '{plant['plant_name']}'!"
+    )
+
+
+@dp.message(Command("my_wands"))
+async def cmd_my_wands(message: types.Message):
+    """Обработчик команды просмотра зарегистрированных палочек"""
+    user_id = message.from_user.id
+    wands = await get_user_wands(user_id)
+    
+    if not wands:
+        await message.answer("You don't have any registered wands.", parse_mode=None)
+        return
+    
+    wands_text = "Your registered wands:\n\n"
+    for wand in wands:
+        registered_date = wand['registered_at'].split()[0] 
+        plant_info = f"Linked to: {wand['plant_name']}" if wand['plant_id'] else "Not linked to any plant"
+        wands_text += (
+            f"• Wand: {wand['wand_id']}\n"
+            f"  {plant_info}\n"
+            f"  Registered: {registered_date}\n\n"
+        )
+    
+    await message.answer(wands_text, parse_mode=None)
+
 
 # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 # QUIZ HANDLERS
