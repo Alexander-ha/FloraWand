@@ -144,10 +144,11 @@ async def get_wand_owner(wand_id: str):
     """Получение владельца палочки по её ID"""
     async with aiosqlite.connect('flowers.db') as db:
         cursor = await db.execute(
-            "SELECT user_id, plant_id FROM users_wands WHERE wand_id = ?", 
+            "SELECT user_id FROM users_wands WHERE wand_id = ?", 
             (wand_id,)
         )
-        result = await cursor.fetchone()
+        result = await cursor.fetchall()
+        print(f"{result}")
         return result if result else (None, None)
 
 @start_router.startup()
@@ -603,20 +604,25 @@ async def cmd_remove_wand(message: types.Message):
     if len(parts) < 2:
         await message.answer(
             "Please specify the wand ID to remove.\n\n"
-            "Usage: /remove_wand <wand_id>"
+            "Usage: /remove_wand <wand_id>",
+            parse_mode=None
         )
         return
+    try:
+        wand_id = parts[1]
+            
+        async with aiosqlite.connect('flowers.db') as db:
+            await db.execute(
+                    "DELETE FROM users_wands WHERE user_id = ? AND wand_id = ?",
+                    (user_id, wand_id)
+                )
+            await db.commit()
+            
+        await message.answer(f"Wand {wand_id} successfully removed from your account.", parse_mode=None)
+    except ValueError:
+        await message.answer("Please, specify wand ID: /remove_wand <wand_id>", parse_mode=None)
+        return
     
-    wand_id = parts[1]
-    
-    async with aiosqlite.connect('flowers.db') as db:
-        await db.execute(
-            "DELETE FROM users_wands WHERE user_id = ? AND wand_id = ?",
-            (user_id, wand_id)
-        )
-        await db.commit()
-    
-    await message.answer(f"Wand {wand_id} successfully removed from your account.")
     
 @dp.message(Command("menu"))
 async def cmd_menu(message: types.Message):
@@ -817,23 +823,25 @@ async def cmd_link_wand(message: types.Message):
     if len(parts) < 3:
         await message.answer(
             "Please specify both wand ID and plant ID.\n\n"
-            "Usage: /link_wand <wand_id> <plant_id>"
+            "Usage: /link_wand <wand_id> <plant_id>", parse_mode = None
         )
         return
     wand_id = parts[1]
     try:
         plant_id = int(parts[2])
     except ValueError:
-        await message.answer("Invalid plant ID. Please specify a numeric plant ID.")
+        await message.answer("Invalid plant ID. Please specify a numeric plant ID.", parse_mode=None)
         return
     wand_owner = await get_wand_owner(wand_id)
-    if not wand_owner or wand_owner[0] != user_id:
-        await message.answer("This wand is not registered to your account.")
+    wand_owners = [x for xs in wand_owner for x in xs]
+    print(f"User was found {user_id}")
+    if user_id not in wand_owners:
+        await message.answer("This wand is not registered to your account.", parse_mode=None)
         return
     user_plants = await get_user_plants(user_id)
     user_plant_ids = [plant['plant_id'] for plant in user_plants]
     if plant_id not in user_plant_ids:
-        await message.answer("The specified plant is not in your collection.")
+        await message.answer("The specified plant is not in your collection.", parse_mode=None)
         return
     async with aiosqlite.connect('flowers.db') as db:
         await db.execute(
@@ -844,7 +852,7 @@ async def cmd_link_wand(message: types.Message):
     
     plant = await get_plant_by_id(plant_id)
     await message.answer(
-        f"✅ Wand {wand_id} successfully linked to '{plant['plant_name']}'!"
+        f"✅ Wand {wand_id} successfully linked to '{plant['plant_name']}'!", parse_mode=None
     )
 
 

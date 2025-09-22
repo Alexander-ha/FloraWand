@@ -23,7 +23,6 @@ def update_database_structure():
                     break
             
             if plant_id_column and plant_id_column[3] == 1:  
-                print("Updating database structure to allow NULL for plant_id...")
                 
                 db.session.execute(text('''
                     CREATE TABLE plants_monitor_final_temp (
