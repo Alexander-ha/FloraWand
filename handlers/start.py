@@ -327,7 +327,7 @@ async def get_plant_stats_from_db(user_id: int, plant_id: int, cnt: int=-1):
 
 def get_main_menu(has_wand: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    
+
     if has_wand:
         builder.row(
             InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
@@ -900,17 +900,14 @@ async def ask_quiz_question(message: types.Message, user_id: int):
 async def show_quiz_results(message: types.Message, user_id: int):
     score = user_quiz_state[user_id]['score']
     
-    recommendation = ("Cactus", "low-maintenance")
+    recommendation = ('Cactus', 'minimal care, lots of sun.')
     for score_range, rec in PLANT_RECOMMENDATIONS.items():
         if score_range[0] <= score <= score_range[1]:
             recommendation = rec
             break
     plant = await get_plant_by_name(recommendation[0])
     text = f"""
-        🎉 Quiz Completed!
-
-        🌿 Recommended plant for you: {' - '.join(recommendation)}
-        {plant['care_description']}
+        🎉 Quiz Completed!\n🌿 Recommended plant for you: {': '.join(recommendation[:2])}\n{plant['care_description']}\n
         Would you like to add this plant to your collection?
     """
     rec_plant = await get_plant_by_name(recommendation[0])
@@ -920,36 +917,91 @@ async def show_quiz_results(message: types.Message, user_id: int):
         InlineKeyboardButton(text="⬅️ Back to Menu", callback_data="main_menu")
     )
     
-    await message.answer(text, reply_markup=builder.as_markup())
+    await bot.send_photo(chat_id=user_id, photo=recommendation[2], caption=text, reply_markup=builder.as_markup())
+    # await message.answer(text, reply_markup=builder.as_markup())
     
     if user_id in user_quiz_state:
         del user_quiz_state[user_id]
 
 QUIZ_QUESTIONS = [
     {
-        'question': 'How often can you water your plants?',
-        'options': ['Daily', '2-3 times a week', 'Once a week', 'Once two weeks'],
-        'scores': [3, 2, 1, 0]
+        'question': "What's your plant care style?",
+        'options': ['🌵 Minimal, I almost never water', '🌿 Sometimes I forget, but I try', '🌸 I love caring, I check every detail'],
+        'scores': [1, 2, 3]
     },
     {
-        'question': 'How much sunlight can you provide for your plant?',
-        'options': ['Lots of direct sunlight', 'Scatterred sunlight', 'Partial shade', 'Darkness'],
-        'scores': [3, 2, 1, 0]
+        'question': "What's the usual temperature at home?",
+        'options': ['☀️ Hot, above 24°C', '🌤 Moderate, 20-24°C ', '❄️ Cool, below 20°C'],
+        'scores': [1, 2, 3]
     },
     {
-        'question': 'What level of care can you provide?',
-        'options': ['Easy care', 'Moderate care', 'Complex care', 'Not important'],
-        'scores': [0, 1, 2, 0]
+        'question': "What kind of light do you have?",
+        'options': ['🌞 Very bright, direct sunlight', '🌥 Medium, soft light', '🌑 Shade or artificial light '],
+        'scores': [1, 2, 3]
+    },
+    {
+        'question': "How do you feel about humidity?",
+        'options': ['💨 I like dry air', "💧 I'm fine with medium humidity", "🌊 I prefer when it's humid and fresh"],
+        'scores': [1, 2, 3]
+    },
+    {
+        'question': "Why do you want a plant?",
+        'options': ['😎 Just to look nice without much care', '🏡 For coziness and greenery', '💖 To care for it like a “green friend”'],
+        'scores': [1, 2, 3]
     }
 ]
 
 PLANT_RECOMMENDATIONS = {
-    (0, 3): ('Dieffenbachia', 'low-maintenance'),
-    (4, 6): ('Cactus', 'medium-meintenance'),
-    (7, 9): ('Monstera', 'high-maintenance')
+    (5, 6): ('Cactus', 'minimal care, lots of sun.', 'https://shorturl.at/L4sbi'),
+    (7, 8): ('Ficus', 'universal, loves balance.', 'https://shorturl.at/7d8je'),
+    (9, 10): ('Monstera', 'needs more moisture and some care.', 'https://tinyurl.com/55w83a8r'),
+    (11, 12): ('Dieffenbachia', 'warm, humid, cozy place.', 'https://tinyurl.com/232ew2x4' ),
+    (13, 15): ('Orchid', 'demanding but very beautiful.', 'https://tinyurl.com/2csh8xje')
 }
 
+## 🇷🇺 Русская версия
 
+# ### ❓ Вопросы
 
+# 1. Какой у тебя стиль ухода за растениями?
 
+# * 🌵 Минимальный, почти не поливаю (1)
+# * 🌿 Иногда забываю, но стараюсь (2)
+# * 🌸 Люблю ухаживать, слежу за каждой деталью (3)
+
+# 2. Какая температура в твоём доме чаще всего?
+
+# * ☀️ Жарко, выше 24°C (1)
+# * 🌤 Умеренно, 20–24°C (2)
+# * ❄️ Прохладно, ниже 20°C (3)
+
+# 3. Какое освещение в твоей комнате?
+
+# * 🌞 Очень яркое, прямое солнце (1)
+# * 🌥 Среднее, рассеянный свет (2)
+# * 🌑 Тень или искусственный свет (3)
+
+# 4. Как ты относишься к влажности?
+
+# * 💨 Люблю сухой воздух (1)
+# * 💧 Нормально к средней влажности (2)
+# * 🌊 Нравится, когда влажно и свежо (3)
+
+# 5. Для чего ты заводишь растение?
+
+# * 😎 Чтобы просто стояло красиво, без забот (1)
+# * 🏡 Для уюта и зелени (2)
+# * 💖 Хочу заботиться, как о «зелёном друге» (3)
+
+# ---
+
+# ### 🌺 Результаты
+
+# * 5–6 баллов → 🌵 Кактус: минимальный уход, много солнца.
+# * 7–8 баллов → 🌿 Фикус: универсальный, любит баланс.
+# * 9–10 баллов → 🌱 Монстера: нужна влага и лёгкий уход.
+# * 11–12 баллов → 🍃 Диффенбахия: тёплый, влажный и уютный уголок.
+# * 13–15 баллов → 🌸 Орхидея: капризная, но очень красивая.
+
+# ---
 
