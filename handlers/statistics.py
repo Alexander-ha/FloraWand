@@ -47,19 +47,21 @@ async def create_time_range_graph(callback: types.CallbackQuery, user_id: int, p
     Создает график для определенного временного диапазона
     
     Args:
-        time_range: '24h', '7d', '30d', 'all', 'auto'
+        time_range: '1h', '24h', '7d', '30d', 'all', 'auto'
     """
     try:
         df = await get_plant_stats_from_db(user_id, plant_id)
         
         if df is None or df.empty:
-            await callback.message.answer("📊 No statistics data available for this period.", parse_mode=None)
+            await callback.message.answer("📊 No statistics data available for this plant.", parse_mode=None)
             return 
         
         # Фильтруем данные по временному диапазону
         now = pd.Timestamp.now()
-        
-        if time_range == '24h':
+        if time_range == '1h':
+            filtered_df = df[df.index >= now - timedelta(hours=1)]
+            title_suffix = ' (1 hour)'
+        elif time_range == '24h':
             filtered_df = df[df.index >= now - timedelta(hours=24)]
             title_suffix = ' (24 hours)'
         elif time_range == '7d':
@@ -73,6 +75,7 @@ async def create_time_range_graph(callback: types.CallbackQuery, user_id: int, p
             title_suffix = ' (all time)'
         
         if filtered_df.empty:
+            await callback.message.answer("📊 No statistics data available for this period.", parse_mode=None)
             return None
         
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 10))

@@ -102,12 +102,13 @@ def get_time_range_menu(user_id: int, plant_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
     builder.row(
+        InlineKeyboardButton(text="📅 1 hour", callback_data=f"graph_1h_{user_id}_{plant_id}"),
         InlineKeyboardButton(text="📊 24 hours", callback_data=f"graph_24h_{user_id}_{plant_id}"),
         InlineKeyboardButton(text="📈 7 days", callback_data=f"graph_7d_{user_id}_{plant_id}"),
-        InlineKeyboardButton(text="📅 30 days", callback_data=f"graph_30d_{user_id}_{plant_id}")
     )
     
     builder.row(
+        InlineKeyboardButton(text="📅 30 days", callback_data=f"graph_30d_{user_id}_{plant_id}"),
         InlineKeyboardButton(text="🕰️ All time", callback_data=f"graph_all_{user_id}_{plant_id}"),
         InlineKeyboardButton(text="🌿 Auto", callback_data=f"graph_auto_{user_id}_{plant_id}")
     )
@@ -195,7 +196,7 @@ async def handle_callback(callback: types.CallbackQuery):
 
     elif  data.startswith("graph_"):
         plant_id = int(data.split("_")[3])
-        await create_time_range_graph(callback, user_id, plant_id, data.split("_")[1])
+        await create_time_range_graph(callback, user_id, plant_id, time_range=data.split("_")[1])
         await callback.message.answer("Other time period?", reply_markup=get_time_range_menu(user_id, plant_id), parse_mode=None)
 
     elif data == "register_wand_info":

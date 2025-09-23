@@ -188,5 +188,3 @@ async def get_wand_owner(wand_id: str):
         print(f"{result}")
         return result if result else (None, None)
     
-
-
