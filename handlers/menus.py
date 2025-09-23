@@ -16,17 +16,17 @@ def get_main_menu(has_wand: bool = True, notify_on: bool = True) -> InlineKeyboa
     builder = InlineKeyboardBuilder()
 
     builder.row(
-            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
+            InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu"),
             InlineKeyboardButton(text="❓ What plant am I?", callback_data="start_quiz")
         )
     if has_wand:
         builder.row(
-            InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu"),
+            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
             InlineKeyboardButton(text="📋 My Wands", callback_data="my_wands")
         )
     else:
         builder.row(
-            InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu"),
+            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
             InlineKeyboardButton(text="🪄 Register Wand", callback_data="register_wand_info")
         )
     if notify_on:
@@ -143,6 +143,10 @@ def get_plant_actions_menu(user_id: int, plant_id: int = None) -> InlineKeyboard
         InlineKeyboardButton(
             text="🌱 Care description", 
             callback_data=f"care_info_{plant_id}" if plant_id else "care_info"
+        ),
+        InlineKeyboardButton(
+            text="🗑️ Delete plant", 
+            callback_data=f"remove_plant_{plant_id}" if plant_id else "remove_plant"
         )
     )
     builder.row(
@@ -290,6 +294,31 @@ async def handle_callback(callback: types.CallbackQuery):
         except:
             await callback.message.answer(
                 "Can't find any wands with such number",
+                parse_mode=None
+            )
+
+    elif data.startswith("remove_plant_"):
+        plant_id = int(data.split("_")[2])
+        try:
+            async with aiosqlite.connect('flowers.db') as db:
+                await db.execute('''
+                DELETE FROM user_plants WHERE user_id = ? and plant_id = ?
+                ''', (user_id, plant_id))
+                await db.execute('''
+                    DELETE FROM users_wands WHERE user_id = ? and plant_id = ?
+                ''', (user_id, plant_id))
+                await db.execute('''
+                    DELETE FROM plants_monitor_final WHERE user_id = ? and plant_id = ?
+                ''', (user_id, plant_id))
+                await db.commit()
+            
+            await callback.message.answer(
+                "Plant was successfully deleted.",
+                parse_mode=None
+            )
+        except:
+            await callback.message.answer(
+                "Error deleting plant info.",
                 parse_mode=None
             )
 

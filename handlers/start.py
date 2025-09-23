@@ -109,34 +109,6 @@ async def cmd_start(message: types.Message):
     
     await message.answer(welcome_text, reply_markup= get_main_menu(has_wand, notify_on), parse_mode=None)
 
-@dp.message(Command("remove_wand"))
-async def cmd_remove_wand(message: types.Message):
-    """Удаление палочки у пользователя"""
-    user_id = message.from_user.id
-    parts = message.text.split()
-    
-    if len(parts) < 2:
-        await message.answer(
-            "Please specify the wand ID to remove.\n\n"
-            "Usage: /remove_wand <wand_id>",
-            parse_mode=None
-        )
-        return
-    try:
-        wand_id = parts[1]
-            
-        async with aiosqlite.connect('flowers.db') as db:
-            await db.execute(
-                    "DELETE FROM users_wands WHERE user_id = ? AND wand_id = ?",
-                    (user_id, wand_id)
-                )
-            await db.commit()
-            
-        await message.answer(f"Wand {wand_id} successfully removed from your account.", parse_mode=None)
-    except ValueError:
-        await message.answer("Please, specify wand ID: /remove_wand <wand_id>", parse_mode=None)
-        return
-    
     
 @dp.message(Command("menu"))
 async def cmd_menu(message: types.Message):
@@ -146,138 +118,167 @@ async def cmd_menu(message: types.Message):
     await message.answer("Main menu:", reply_markup= get_main_menu(await user_has_wand(user_id), await is_notify_on(user_id)), parse_mode=None)
 
 
-@dp.message(Command("register_wand"))
-async def cmd_register_wand(message: types.Message):
-    """Обработчик команды регистрации новой палочки"""
-    user_id = message.from_user.id
-    parts = message.text.split()
+# @dp.message(Command("remove_wand"))
+# async def cmd_remove_wand(message: types.Message):
+#     """Удаление палочки у пользователя"""
+#     user_id = message.from_user.id
+#     parts = message.text.split()
     
-    if len(parts) < 2:
-        await message.answer(
-            "Please specify the wand ID after the command.\n\n"
-            "Usage: /register_wand <wand_id> [plant_id]\n\n"
-            "You can optionally specify a plant ID to link the wand to a specific plant.", 
-            parse_mode=None
-        )
-        return
+#     if len(parts) < 2:
+#         await message.answer(
+#             "Please specify the wand ID to remove.\n\n"
+#             "Usage: /remove_wand <wand_id>",
+#             parse_mode=None
+#         )
+#         return
+#     try:
+#         wand_id = parts[1]
+            
+#         async with aiosqlite.connect('flowers.db') as db:
+#             await db.execute(
+#                     "DELETE FROM users_wands WHERE user_id = ? AND wand_id = ?",
+#                     (user_id, wand_id)
+#                 )
+#             await db.commit()
+            
+#         await message.answer(f"Wand {wand_id} successfully removed from your account.", parse_mode=None)
+#     except ValueError:
+#         await message.answer("Please, specify wand ID: /remove_wand <wand_id>", parse_mode=None)
+#         return
     
-    wand_id = parts[1]
-    
-    # Проверяем формат MAC-адреса
-    if not is_valid_mac_address(wand_id):
-        await message.answer(
-            "Invalid MAC address format. Please use format like: 30:83:98:B2:D4:0D\n"
-            "The MAC address should contain 6 pairs of hex digits separated by colons or hyphens.",
-            parse_mode=None
-        )
-        return
-    
-    plant_id = None
-    
-    if len(parts) >= 3:
-        try:
-            plant_id = int(parts[2])
-            user_plants = await get_user_plants(user_id)
-            user_plant_ids = [plant['plant_id'] for plant in user_plants]
-            if plant_id not in user_plant_ids:
-                await message.answer(
-                    "The specified plant is not in your collection. "
-                    "Registering wand without plant association.",
-                    parse_mode=None
-                )
-                plant_id = None
-        except ValueError:
-            await message.answer(
-                "Invalid plant ID. Registering wand without plant association.",
-                parse_mode=None
-            )
-            plant_id = None
-    
-    try:
-        success = await register_user_wand(user_id, wand_id, plant_id)
-        if success:
-            if plant_id:
-                plant = await get_plant_by_id(plant_id)
-                await message.answer(
-                    f"✅ Wand {wand_id} successfully registered for '{plant['plant_name']}'!",
-                    parse_mode=None
-                )
-            else:
-                await message.answer(
-                    f"✅ Wand {wand_id} successfully registered! "
-                    "You can link it to a plant later using /link_wand command.",
-                    parse_mode=None
-                )
-            await message.answer("Main menu:", reply_markup= get_main_menu(True, await is_notify_on(user_id)), parse_mode=None)
-        else:
-            await message.answer("❌ Error registering the wand.", parse_mode=None)
-    except ValueError as e:
-        await message.answer(str(e), parse_mode=None)
 
-@dp.message(Command("link_wand"))
-async def cmd_link_wand(message: types.Message):
-    """Привязка палочки к растению"""
-    user_id = message.from_user.id
-    parts = message.text.split()
+# @dp.message(Command("register_wand"))
+# async def cmd_register_wand(message: types.Message):
+#     """Обработчик команды регистрации новой палочки"""
+#     user_id = message.from_user.id
+#     parts = message.text.split()
     
-    if len(parts) < 3:
-        await message.answer(
-            "Please specify both wand ID and plant ID.\n\n"
-            "Usage: /link_wand <wand_id> <plant_id>", parse_mode = None
-        )
-        return
-    wand_id = parts[1]
-    try:
-        plant_id = int(parts[2])
-    except ValueError:
-        await message.answer("Invalid plant ID. Please specify a numeric plant ID.", parse_mode=None)
-        return
-    wand_owner = await get_wand_owner(wand_id)
-    wand_owners = [x for xs in wand_owner for x in xs]
-    print(f"User was found {user_id}")
-    if user_id not in wand_owners:
-        await message.answer("This wand is not registered to your account.", parse_mode=None)
-        return
-    user_plants = await get_user_plants(user_id)
-    user_plant_ids = [plant['plant_id'] for plant in user_plants]
-    if plant_id not in user_plant_ids:
-        await message.answer("The specified plant is not in your collection.", parse_mode=None)
-        return
-    async with aiosqlite.connect('flowers.db') as db:
-        await db.execute(
-            "UPDATE users_wands SET plant_id = ? WHERE wand_id = ? AND user_id = ?",
-            (plant_id, wand_id, user_id)
-        )
-        await db.commit()
+#     if len(parts) < 2:
+#         await message.answer(
+#             "Please specify the wand ID after the command.\n\n"
+#             "Usage: /register_wand <wand_id> [plant_id]\n\n"
+#             "You can optionally specify a plant ID to link the wand to a specific plant.", 
+#             parse_mode=None
+#         )
+#         return
     
-    plant = await get_plant_by_id(plant_id)
-    await message.answer(
-        f"✅ Wand {wand_id} successfully linked to '{plant['plant_name']}'!", parse_mode=None
-    )
+#     wand_id = parts[1]
+    
+#     # Проверяем формат MAC-адреса
+#     if not is_valid_mac_address(wand_id):
+#         await message.answer(
+#             "Invalid MAC address format. Please use format like: 30:83:98:B2:D4:0D\n"
+#             "The MAC address should contain 6 pairs of hex digits separated by colons or hyphens.",
+#             parse_mode=None
+#         )
+#         return
+    
+#     plant_id = None
+    
+#     if len(parts) >= 3:
+#         try:
+#             plant_id = int(parts[2])
+#             user_plants = await get_user_plants(user_id)
+#             user_plant_ids = [plant['plant_id'] for plant in user_plants]
+#             if plant_id not in user_plant_ids:
+#                 await message.answer(
+#                     "The specified plant is not in your collection. "
+#                     "Registering wand without plant association.",
+#                     parse_mode=None
+#                 )
+#                 plant_id = None
+#         except ValueError:
+#             await message.answer(
+#                 "Invalid plant ID. Registering wand without plant association.",
+#                 parse_mode=None
+#             )
+#             plant_id = None
+    
+    # try:
+    #     success = await register_user_wand(user_id, wand_id, plant_id)
+    #     if success:
+    #         if plant_id:
+    #             plant = await get_plant_by_id(plant_id)
+    #             await message.answer(
+    #                 f"✅ Wand {wand_id} successfully registered for '{plant['plant_name']}'!",
+    #                 parse_mode=None
+    #             )
+    #         else:
+    #             await message.answer(
+    #                 f"✅ Wand {wand_id} successfully registered! "
+    #                 "You can link it to a plant later using /link_wand command.",
+    #                 parse_mode=None
+    #             )
+    #         await message.answer("Main menu:", reply_markup= get_main_menu(True, await is_notify_on(user_id)), parse_mode=None)
+    #     else:
+    #         await message.answer("❌ Error registering the wand.", parse_mode=None)
+    # except ValueError as e:
+    #     await message.answer(str(e), parse_mode=None)
+
+# @dp.message(Command("link_wand"))
+# async def cmd_link_wand(message: types.Message):
+#     """Привязка палочки к растению"""
+#     user_id = message.from_user.id
+#     parts = message.text.split()
+    
+#     if len(parts) < 3:
+#         await message.answer(
+#             "Please specify both wand ID and plant ID.\n\n"
+#             "Usage: /link_wand <wand_id> <plant_id>", parse_mode = None
+#         )
+#         return
+#     wand_id = parts[1]
+#     try:
+#         plant_id = int(parts[2])
+#     except ValueError:
+#         await message.answer("Invalid plant ID. Please specify a numeric plant ID.", parse_mode=None)
+#         return
+#     wand_owner = await get_wand_owner(wand_id)
+#     wand_owners = [x for xs in wand_owner for x in xs]
+#     print(f"User was found {user_id}")
+#     if user_id not in wand_owners:
+#         await message.answer("This wand is not registered to your account.", parse_mode=None)
+#         return
+#     user_plants = await get_user_plants(user_id)
+#     user_plant_ids = [plant['plant_id'] for plant in user_plants]
+#     if plant_id not in user_plant_ids:
+#         await message.answer("The specified plant is not in your collection.", parse_mode=None)
+#         return
+#     async with aiosqlite.connect('flowers.db') as db:
+#         await db.execute(
+#             "UPDATE users_wands SET plant_id = ? WHERE wand_id = ? AND user_id = ?",
+#             (plant_id, wand_id, user_id)
+    #     )
+    #     await db.commit()
+    
+    # plant = await get_plant_by_id(plant_id)
+    # await message.answer(
+    #     f"✅ Wand {wand_id} successfully linked to '{plant['plant_name']}'!", parse_mode=None
+    # )
 
 
-@dp.message(Command("my_wands"))
-async def cmd_my_wands(message: types.Message):
-    """Обработчик команды просмотра зарегистрированных палочек"""
-    builder = InlineKeyboardBuilder()
-    user_id = message.from_user.id
-    wands = await get_user_wands(user_id)
+# @dp.message(Command("my_wands"))
+# async def cmd_my_wands(message: types.Message):
+#     """Обработчик команды просмотра зарегистрированных палочек"""
+#     builder = InlineKeyboardBuilder()
+#     user_id = message.from_user.id
+#     wands = await get_user_wands(user_id)
     
-    if not wands:
-        await message.answer("You don't have any registered wands.", parse_mode=None)
-        return
+#     if not wands:
+#         await message.answer("You don't have any registered wands.", parse_mode=None)
+#         return
     
-    wands_text = "Your registered wands:\n\n"
-    for wand in wands:
-        registered_date = wand['registered_at'].split()[0] 
-        plant_info = f"Linked to: {wand['plant_name']}" if wand['plant_id'] else "Not linked to any plant"
-        wands_text += (
-            f"• Wand: {wand['wand_id']}\n"
-            f"  {plant_info}\n"
-            f"  Registered: {registered_date}\n\n"
-        )
-        builder.row(
-            InlineKeyboardButton(text=wands_text, reply_markup=get_wand_control_menu(user_id, wand['wand_id']), parse_mode=None),
-        )
+#     wands_text = "Your registered wands:\n\n"
+#     for wand in wands:
+#         registered_date = wand['registered_at'].split()[0] 
+#         plant_info = f"Linked to: {wand['plant_name']}" if wand['plant_id'] else "Not linked to any plant"
+#         wands_text += (
+#             f"• Wand: {wand['wand_id']}\n"
+#             f"  {plant_info}\n"
+#             f"  Registered: {registered_date}\n\n"
+#         )
+#         builder.row(
+#             InlineKeyboardButton(text=wands_text, reply_markup=get_wand_control_menu(user_id, wand['wand_id']), parse_mode=None),
+#         )
     
-    return builder.as_markup()
+#     return builder.as_markup()
