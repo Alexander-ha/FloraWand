@@ -113,16 +113,17 @@ async def get_wand_control_menu(user_id: int, wand_id: str) -> InlineKeyboardMar
     
     builder.row(
         InlineKeyboardButton(text="🌵 Connected plants", callback_data=f"connected_plants_{wand_id}_{user_id}"),
-    )
-    
-    builder.row(
         InlineKeyboardButton(text="🧒 Connected users", callback_data=f"connected_users_{wand_id}_{user_id}"),
-        InlineKeyboardButton(text="🔮 Link wand", callback_data=f"link_wand_{wand_id}")
     )
-
     builder.row(
+        InlineKeyboardButton(text="🔮 Link wand", callback_data=f"link_wand_{wand_id}"),
         InlineKeyboardButton(text="🗑️ Delete wand", callback_data=f"remove_wand_{wand_id}"),
-        InlineKeyboardButton(text="⬅️ Back to wands", callback_data="my_wands")
+    )
+    builder.row(
+        InlineKeyboardButton(text="⬅️ Back to wands", callback_data="my_wands"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="⬅️ Back to main menu", callback_data="main_menu")
     )
         
     return builder.as_markup()
@@ -137,19 +138,18 @@ def get_plant_actions_menu(user_id: int, plant_id: int = None) -> InlineKeyboard
         InlineKeyboardButton(
             text="📈 Current state", 
             callback_data=f"stats_now_{user_id}_{plant_id}" if plant_id else "stats_now"
-        )
-    )
-    builder.row(
+        ),
         InlineKeyboardButton(
             text="🌱 Care description", 
             callback_data=f"care_info_{plant_id}" if plant_id else "care_info"
         ),
+    )
+    builder.row(
+        
         InlineKeyboardButton(
             text="🗑️ Delete plant", 
             callback_data=f"remove_plant_{plant_id}" if plant_id else "remove_plant"
-        )
-    )
-    builder.row(
+        ),
         InlineKeyboardButton(
             text="⬅️ Back to my plants", 
             callback_data="my_plants"
@@ -405,8 +405,7 @@ async def handle_callback(callback: types.CallbackQuery):
     elif data.startswith("select_wand_"):
         user_id = data.split("_")[2]
         wand_id = data.split("_")[3]
-        await callback.message.answer(
-            f"Managing wand: {wand_id}", 
+        await callback.message.answer("Your wand information: "+ wand_id, 
             reply_markup=await get_wand_control_menu(user_id, wand_id), 
             parse_mode=None
         )

@@ -19,7 +19,7 @@ async def is_notify_on(user_id: int):
             (user_id,)
         )
         user = await cursor.fetchone()
-        return user[2] if user else False
+        return user[3] if user else False
 
 async def user_has_wand(user_id: int) -> bool:
     """Проверка наличия палочек у пользователя"""

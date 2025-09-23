@@ -134,10 +134,10 @@ async def show_current_stats(callback: types.CallbackQuery, user_id: int, plant_
     else:
         stats_text = f"""
         📈 Current state of your {plant['plant_name']}:
-            • Soil moisture level: {df['water_lvl'].values[0]}%
-            • Temperature: {df['temp_lvl'].values[0]}°C
-            • Sunlight: {df['light_lvl'].values[0]} lux
-            • Humidity: {df['humidity_lvl'].values[0]} %
+            \t• Soil moisture level: {df['water_lvl'].values[0]}%
+            \t• Temperature: {df['temp_lvl'].values[0]}°C
+            \t• Sunlight: {df['light_lvl'].values[0]} lux
+            \t• Humidity: {df['humidity_lvl'].values[0]} %
         """
     return stats_text
 
