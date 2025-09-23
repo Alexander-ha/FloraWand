@@ -36,6 +36,41 @@ def get_main_menu(has_wand: bool = True, notify_on: bool = True) -> InlineKeyboa
 
     return builder.as_markup()
 
+async def get_wand_plants_menu(user_id: int, wand_id: str) -> InlineKeyboardMarkup:
+    plants = await get_wand_plants(user_id, wand_id)
+    builder = InlineKeyboardBuilder()
+    
+    for plant in plants:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"🌱 {plant['plant_name']}", 
+                callback_data=f"plant_detail_{plant['plant_id']}"
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="⬅️ Back to Wand Menu", 
+            callback_data=f"select_wand_{user_id}_{wand_id}"
+        )
+    )
+    return builder.as_markup()
+async def get_wand_users_menu(user_id: int, wand_id: str) -> InlineKeyboardMarkup:
+    users = await get_wand_users(wand_id)  
+    builder = InlineKeyboardBuilder()
+    
+    for user in users:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"👤 User: {user}",
+                callback_data=f"get_user_{user}"
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(text="⬅️ Back to Wand Menu", callback_data=f"select_wand_{user_id}_{wand_id}")
+    )
+    return builder.as_markup()
+
+
 async def get_user_plants_menu(user_id: int) -> InlineKeyboardMarkup:
     plants = await get_user_plants(user_id)
     builder = InlineKeyboardBuilder()
@@ -67,6 +102,29 @@ async def get_add_plant_menu() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="⬅️ Back to Main Menu", callback_data="main_menu")
     )
     
+    return builder.as_markup()
+
+async def get_wand_control_menu(user_id: int, wand_id: str) -> InlineKeyboardMarkup:
+    """
+    Создает меню для управления wand'ом
+    """
+    
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="🌵 Connected plants", callback_data=f"connected_plants_{wand_id}_{user_id}"),
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="🧒 Connected users", callback_data=f"connected_users_{wand_id}_{user_id}"),
+        InlineKeyboardButton(text="🔮 Link wand", callback_data=f"link_wand_{wand_id}")
+    )
+
+    builder.row(
+        InlineKeyboardButton(text="🗑️ Delete wand", callback_data=f"remove_wand_{wand_id}"),
+        InlineKeyboardButton(text="⬅️ Back to wands", callback_data="my_wands")
+    )
+        
     return builder.as_markup()
 
 def get_plant_actions_menu(user_id: int, plant_id: int = None) -> InlineKeyboardMarkup:
@@ -123,8 +181,56 @@ def get_time_range_menu(user_id: int, plant_id: int) -> InlineKeyboardMarkup:
     
     return builder.as_markup()
 
+async def get_plants_selection_menu(user_id: int, wand_id: str) -> InlineKeyboardMarkup:
+    """Меню для выбора растения"""
+    user_plants = await get_user_plants(user_id)
+    builder = InlineKeyboardBuilder()
+    
+    for plant in user_plants:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"🌱 {plant['plant_name']} (ID: {plant['plant_id']})",
+                callback_data=f"select_plant_for_wand_{wand_id}_{plant['plant_id']}"
+            )
+        )
+    
+    builder.row(
+        InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_link_wand")
+    )
+    
+    return builder.as_markup()
 
 
+async def get_wands(user_id: int) -> InlineKeyboardMarkup:
+    """Create menu for selecting a wand"""
+    builder = InlineKeyboardBuilder()
+    wands = await get_user_wands(user_id)
+
+    if not wands:
+        builder.row(
+            InlineKeyboardButton(text="🪄 Register New Wand", callback_data="register_wand_info")
+        )
+        builder.row(
+            InlineKeyboardButton(text="⬅️ Back to Main Menu", callback_data="main_menu")
+        )
+        return builder.as_markup()
+
+    for wand in wands:
+        plant_name = wand['plant_name'] if wand['plant_name'] else "Not linked"
+        button_text = f"🪄 {wand['wand_id']} - {plant_name}"
+        
+        builder.row(
+            InlineKeyboardButton(text=button_text, callback_data=f"select_wand_{user_id}_{wand['wand_id']}")
+        )
+    
+    builder.row(
+        InlineKeyboardButton(text="➕ Register New Wand", callback_data="register_wand_info")
+    )
+    builder.row(
+        InlineKeyboardButton(text="⬅️ Back to Main Menu", callback_data="main_menu")
+    )
+    
+    return builder.as_markup()
 
 @dp.callback_query()
 async def handle_callback(callback: types.CallbackQuery):
@@ -152,7 +258,65 @@ async def handle_callback(callback: types.CallbackQuery):
             await callback.message.answer("Plant added successfully! ✅ 🌿", parse_mode=None)
         else:
             await callback.message.answer("This plant is already in your collection! ⚠️", parse_mode=None)
-    
+
+    elif data.startswith("link_wand_"):
+        wand_id = data.split("_")[2]
+        
+        user_plants = await get_user_plants(user_id)
+        if not user_plants:
+            await callback.message.answer("You don't have any plants yet.", parse_mode=None)
+            return
+        
+        await callback.message.answer(
+            "Select a plant to link to this wand:",
+            reply_markup=await get_plants_selection_menu(user_id, wand_id),
+            parse_mode=None
+        )
+
+    elif data.startswith("remove_wand_"):
+        wand_id = data.split("_")[2]
+        try:
+            async with aiosqlite.connect('flowers.db') as db:
+                await db.execute(
+                        "DELETE FROM users_wands WHERE user_id = ? AND wand_id = ?",
+                        (user_id, wand_id)
+                    )
+                await db.commit()
+            
+            await callback.message.answer(
+                "Wand was successfully deleted.",
+                parse_mode=None
+            )
+        except:
+            await callback.message.answer(
+                "Can't find any wands with such number",
+                parse_mode=None
+            )
+
+    elif data.startswith("select_plant_for_wand_"):
+        parts = data.split("_")
+        wand_id = parts[4]
+        plant_id = int(parts[5])
+        
+        async with aiosqlite.connect('flowers.db') as db:
+            await db.execute(
+                "UPDATE users_wands SET plant_id = ? WHERE wand_id = ? AND user_id = ?",
+                (plant_id, wand_id, user_id)
+            )
+            await db.commit()
+        
+        plant = await get_plant_by_id(plant_id)
+        await callback.message.answer(
+            f"✅ Wand {wand_id} successfully linked to '{plant['plant_name']}'!", 
+            parse_mode=None
+        )
+
+    elif data == "cancel_link_wand":
+        await callback.message.answer("Linking operation cancelled.", parse_mode=None)
+
+    elif data.startswith("get_user_"):
+            await callback.message.answer("This info is currently closed", parse_mode=None)
+
     elif data.startswith("plant_detail_"):
         plant_id = int(data.split("_")[2])
         plant = await get_plant_by_id(plant_id)
@@ -174,6 +338,17 @@ async def handle_callback(callback: types.CallbackQuery):
         plant_id = int(data.split("_")[2])
         care_text = await show_care_info(plant_id)
         await callback.message.answer(care_text, reply_markup=get_plant_actions_menu(user_id, plant_id), parse_mode=None)
+    
+    elif data.startswith("connected_plants_"):
+        wand_id = data.split("_")[2]
+        user_id = data.split("_")[3]
+        await callback.message.answer("Here are the plants, connected to your wand", reply_markup=await get_wand_plants_menu(user_id, wand_id), parse_mode=None)
+
+    elif data.startswith("connected_users_"):
+        wand_id = data.split("_")[2]
+        user_id = data.split("_")[3]
+        await callback.message.answer("Here are the users, connected to your wand", reply_markup=await get_wand_users_menu(user_id, wand_id), parse_mode=None)
+
 
     elif data == "start_quiz":
         user_quiz_state[user_id] = {'current_question': 0, 'score': 0}
@@ -197,6 +372,15 @@ async def handle_callback(callback: types.CallbackQuery):
                 await ask_quiz_question(callback.message, user_id)
             else:
                 await show_quiz_results(callback.message, user_id)
+
+    elif data.startswith("select_wand_"):
+        user_id = data.split("_")[2]
+        wand_id = data.split("_")[3]
+        await callback.message.answer(
+            f"Managing wand: {wand_id}", 
+            reply_markup=await get_wand_control_menu(user_id, wand_id), 
+            parse_mode=None
+        )
 
     elif  data.startswith("graph_"):
         plant_id = int(data.split("_")[3])
@@ -225,9 +409,8 @@ async def handle_callback(callback: types.CallbackQuery):
                     f"  Plant: {wand['plant_name']} (ID: {wand['plant_id']})\n"
                     f"  Registered: {registered_date}\n\n"
                 )
-            await callback.message.answer(wands_text, parse_mode=None)
+            await callback.message.answer(wands_text, reply_markup=await get_wands(user_id), parse_mode=None)
 
     elif data == "notify_on_off":
         await change_notify(user_id)
-
     await callback.answer()
