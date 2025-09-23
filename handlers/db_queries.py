@@ -188,3 +188,35 @@ async def get_wand_owner(wand_id: str):
         print(f"{result}")
         return result if result else (None, None)
     
+async def del_user(user_id: int):
+    async with aiosqlite.connect('flowers.db') as db:
+        await db.execute('''
+            DELETE FROM user_plants WHERE user_id = ?
+        ''', (user_id, ))
+        await db.execute('''
+            DELETE FROM users_wands WHERE user_id = ?
+        ''', (user_id, ))
+        await db.execute('''
+            DELETE FROM plants_monitor_final WHERE user_id = ?
+        ''', (user_id, ))
+        await db.commit()
+
+async def del_plant(user_id: int, plant_id: int):
+    async with aiosqlite.connect('flowers.db') as db:
+        await db.execute('''
+            DELETE FROM user_plants WHERE user_id = ? and plant_id = ?
+        ''', (user_id, plant_id))
+        await db.execute('''
+            DELETE FROM users_wands WHERE user_id = ? and plant_id = ?
+        ''', (user_id, plant_id))
+        await db.execute('''
+            DELETE FROM plants_monitor_final WHERE user_id = ? and plant_id = ?
+        ''', (user_id, plant_id))
+        await db.commit()
+
+async def del_wand(user_id: int, wand_id: int):
+    async with aiosqlite.connect('flowers.db') as db:
+        await db.execute('''
+            DELETE FROM users_wands WHERE user_id = ? and wand_id = ?
+        ''', (user_id, wand_id))
+        await db.commit()
