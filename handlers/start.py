@@ -258,6 +258,7 @@ async def cmd_link_wand(message: types.Message):
 @dp.message(Command("my_wands"))
 async def cmd_my_wands(message: types.Message):
     """Обработчик команды просмотра зарегистрированных палочек"""
+    builder = InlineKeyboardBuilder()
     user_id = message.from_user.id
     wands = await get_user_wands(user_id)
     
@@ -274,5 +275,8 @@ async def cmd_my_wands(message: types.Message):
             f"  {plant_info}\n"
             f"  Registered: {registered_date}\n\n"
         )
+        builder.row(
+            InlineKeyboardButton(text=wands_text, reply_markup=get_wand_control_menu(user_id, wand['wand_id']), parse_mode=None),
+        )
     
-    await message.answer(wands_text, parse_mode=None)
+    return builder.as_markup()

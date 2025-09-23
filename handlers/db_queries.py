@@ -78,6 +78,18 @@ async def register_user_wand(user_id: int, wand_id: str, plant_id: int = None):
             logger.error(f"Error registering wand: {e}")
             return False
 
+async def get_wand_plants(user_id: int, wand_id: str):
+    """Получение растений для конкретной палочки пользователя"""
+    async with aiosqlite.connect('flowers.db') as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('''
+            SELECT p.*, up.registered_at
+            FROM plants_info_new p
+            JOIN users_wands up ON p.plant_id = up.plant_id
+            WHERE up.user_id = ? AND  up.wand_id = ?
+            ORDER BY up.registered_at DESC
+        ''', (user_id, wand_id, ))
+        return await cursor.fetchall()
 
 async def get_user_plants(user_id: int):
     """Получение растений пользователя"""
@@ -87,7 +99,7 @@ async def get_user_plants(user_id: int):
             SELECT p.*, up.added_at 
             FROM plants_info_new p
             JOIN user_plants up ON p.plant_id = up.plant_id
-            WHERE up.user_id = ?
+            WHERE up.user_id = ? AND 
             ORDER BY up.added_at DESC
         ''', (user_id,))
         return await cursor.fetchall()
