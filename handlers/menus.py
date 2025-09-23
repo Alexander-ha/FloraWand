@@ -12,7 +12,7 @@ from handlers.statistics import *
 
 logger = logging.getLogger(__name__)
 
-def get_main_menu(has_wand: bool = True) -> InlineKeyboardMarkup:
+def get_main_menu(has_wand: bool = True, notify_on: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.row(
@@ -29,6 +29,10 @@ def get_main_menu(has_wand: bool = True) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu"),
             InlineKeyboardButton(text="🪄 Register Wand", callback_data="register_wand_info")
         )
+    if notify_on:
+        builder.row(InlineKeyboardButton(text="📴 Alerts OFF", callback_data="notify_on_off"))
+    else:
+        builder.row(InlineKeyboardButton(text="📳 Alerts ON", callback_data="notify_on_off"))
 
     return builder.as_markup()
 
@@ -127,7 +131,7 @@ async def handle_callback(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     data = callback.data
     if data == "main_menu":
-        await callback.message.answer("Main menu:", reply_markup=get_main_menu(await user_has_wand(user_id)), parse_mode=None)
+        await callback.message.answer("Main menu:", reply_markup=get_main_menu(await user_has_wand(user_id), await is_notify_on(user_id)), parse_mode=None)
     
     elif data == "my_plants":
         plants = await get_user_plants(user_id)
@@ -222,4 +226,8 @@ async def handle_callback(callback: types.CallbackQuery):
                     f"  Registered: {registered_date}\n\n"
                 )
             await callback.message.answer(wands_text, parse_mode=None)
+
+    elif data == "notify_on_off":
+        await change_notify(user_id)
+
     await callback.answer()

@@ -4,6 +4,23 @@ import logging
 import re
 logger = logging.getLogger(__name__)
 
+async def change_notify(user_id: int):
+    async with aiosqlite.connect('flowers.db') as db:
+        await db.execute(
+            'UPDATE users SET notify = NOT notify WHERE user_id = ?', 
+            (user_id,)
+        )
+        await db.commit()
+
+async def is_notify_on(user_id: int):
+    async with aiosqlite.connect('flowers.db') as db:
+        cursor = await db.execute(
+            'SELECT * FROM users WHERE user_id = ?', 
+            (user_id,)
+        )
+        user = await cursor.fetchone()
+        return user[2] if user else False
+
 async def user_has_wand(user_id: int) -> bool:
     """Проверка наличия палочек у пользователя"""
     async with aiosqlite.connect('flowers.db') as db:
@@ -220,3 +237,4 @@ async def del_wand(user_id: int, wand_id: int):
             DELETE FROM users_wands WHERE user_id = ? and wand_id = ?
         ''', (user_id, wand_id))
         await db.commit()
+

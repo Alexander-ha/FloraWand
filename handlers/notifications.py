@@ -1,7 +1,8 @@
 import aiosqlite
 from create_bot import bot, logger
 from datetime import datetime, timedelta
-from handlers.start import get_wand_users, get_main_menu, user_has_wand
+from handlers.db_queries import get_wand_users, user_has_wand, is_notify_on
+from handlers.menus import get_main_menu
 
 async def check_plant_conditions_by_mac(mac_address: str):
     """
@@ -131,7 +132,11 @@ async def check_plant_conditions(latest_data: dict, plant_info: dict):
 
 async def send_alerts_to_user(user_id, alerts, plant_id):
     """Отправляет уведомления пользователю"""
+    notify_on = await is_notify_on(user_id)
+    assert isinstance(notify_on, bool)
     try:
+        if not notify_on:
+            return
         plant_name = await get_plant_name_by_id(plant_id)
         
         alert_text = "\n".join(alerts)
@@ -141,7 +146,7 @@ async def send_alerts_to_user(user_id, alerts, plant_id):
             chat_id=user_id,
             text=full_message,
             parse_mode="Markdown",
-            reply_markup=get_main_menu(await user_has_wand(user_id))
+            reply_markup=get_main_menu(await user_has_wand(user_id), await is_notify_on(user_id))
         )
         
         logger.info(f"Alerts sent to user {user_id} for plant {plant_id}")

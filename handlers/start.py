@@ -92,7 +92,8 @@ async def cmd_start(message: types.Message):
     user = message.from_user
     await add_user(user.id, user.username)
     has_wand = await user_has_wand(user.id)
-    
+    notify_on = await is_notify_on(user.id)
+
     welcome_text = f"""
     🌿 Welcome to Flora Wand Bot, {user.first_name}!
 
@@ -106,7 +107,7 @@ async def cmd_start(message: types.Message):
     if not has_wand:
         welcome_text += "\n\n⚠️ Please register your wand first to access all features!"
     
-    await message.answer(welcome_text, reply_markup= get_main_menu(has_wand), parse_mode=None)
+    await message.answer(welcome_text, reply_markup= get_main_menu(has_wand, notify_on), parse_mode=None)
 
 @dp.message(Command("remove_wand"))
 async def cmd_remove_wand(message: types.Message):
@@ -142,7 +143,7 @@ async def cmd_menu(message: types.Message):
     user_id = message.from_user.id
     if user_id in user_quiz_state:
         del user_quiz_state[user_id]
-    await message.answer("Main menu:", reply_markup= get_main_menu(await user_has_wand(user_id)), parse_mode=None)
+    await message.answer("Main menu:", reply_markup= get_main_menu(await user_has_wand(user_id), await is_notify_on(user_id)), parse_mode=None)
 
 
 @dp.message(Command("register_wand"))
@@ -207,7 +208,7 @@ async def cmd_register_wand(message: types.Message):
                     "You can link it to a plant later using /link_wand command.",
                     parse_mode=None
                 )
-            await message.answer("Main menu:", reply_markup= get_main_menu(True), parse_mode=None)
+            await message.answer("Main menu:", reply_markup= get_main_menu(True, await is_notify_on(user_id)), parse_mode=None)
         else:
             await message.answer("❌ Error registering the wand.", parse_mode=None)
     except ValueError as e:
