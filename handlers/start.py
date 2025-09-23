@@ -2,40 +2,33 @@ from aiogram import Router
 from aiogram.filters import Command
 import aiosqlite
 import logging
-from typing import Optional
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from aiogram import types
-import matplotlib.pyplot as plt
-import pandas as pd
-from datetime import timedelta
-from io import BytesIO
-import re
-import matplotlib.dates as mdates
 
 from create_bot import bot, dp
+from handlers.quiz import user_quiz_state
+
+from handlers.db_queries import *
+from handlers.menus import get_main_menu
+from handlers.menus import *
 
 logger = logging.getLogger(__name__)
 start_router = Router()
-user_quiz_state = {}
-db_connection = None
 
+@start_router.startup()
 async def init_db():
-    global db_connection
-    if db_connection is None:
-        db_connection = await aiosqlite.connect('flowers.db')
-        await db_connection.execute('PRAGMA journal_mode=WAL')
-        await db_connection.execute('PRAGMA busy_timeout=5000')
+    async with aiosqlite.connect('flowers.db') as db:
+        await db.execute('PRAGMA journal_mode=WAL')
+        await db.execute('PRAGMA busy_timeout=5000')
 
 
-        await db_connection.execute('''
+        await db.execute('''
             CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         ''')
-        await db_connection.execute('''
+        await db.execute('''
             CREATE TABLE IF NOT EXISTS user_plants (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -46,7 +39,7 @@ async def init_db():
             UNIQUE(user_id, plant_id) 
         )
         ''')
-        await db_connection.execute('''
+        await db.execute('''
             CREATE TABLE IF NOT EXISTS plants_monitor_final (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -57,7 +50,7 @@ async def init_db():
                 measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        await db_connection.execute('''
+        await db.execute('''
             CREATE TABLE IF NOT EXISTS users_wands (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -68,13 +61,13 @@ async def init_db():
                 FOREIGN KEY (plant_id) REFERENCES plants_info_new (plant_id)
             )
         ''')
-        await db_connection.execute('''
+        await db.execute('''
             CREATE INDEX IF NOT EXISTS idx_monitor_user_plant ON plants_monitor_final (user_id, plant_id)
         ''')
-        await db_connection.execute('''
+        await db.execute('''
             CREATE INDEX IF NOT EXISTS idx_monitor_timestamp ON plants_monitor_final (measured_at)            
         ''')
-        await db_connection.execute('''
+        await db.execute('''
             CREATE INDEX IF NOT EXISTS idx_wand_id ON users_wands (wand_id)
         ''')
 
@@ -89,490 +82,10 @@ async def init_db():
         #         UPDATE plants_info_new SET care_description = ? WHERE plant_id = ?
         #     '''
         #     await db_connection.execute(query, (plant, i+1))
-        await db_connection.commit()
+        await db.commit()
         logger.info("Database initiated.")
 
 
-async def close_db():
-    """Closing connection to database..."""
-    global db_connection
-    if db_connection:
-        await db_connection.close()
-        db_connection = None
-        logger.info("Connection closed.")
-
-async def register_user_wand(user_id: int, wand_id: str, plant_id: int = None):
-    """Регистрация новой палочки для пользователя"""
-    if not is_valid_mac_address(wand_id):
-        raise ValueError("Invalid MAC address format")
-    
-    async with aiosqlite.connect('flowers.db') as db:
-        try:
-            cursor = await db.execute(
-                "SELECT 1 FROM users_wands WHERE user_id = ? AND wand_id = ?",
-                (user_id, wand_id)
-            )
-            existing = await cursor.fetchone()
-            
-            if existing:
-                await db.execute(
-                    "UPDATE users_wands SET plant_id = ? WHERE user_id = ? AND wand_id = ?",
-                    (plant_id, user_id, wand_id)
-                )
-            else:
-                await db.execute('''
-                    INSERT INTO users_wands (user_id, plant_id, wand_id)
-                    VALUES (?, ?, ?)
-                ''', (user_id, plant_id, wand_id))
-            
-            await db.commit()
-            return True
-        except Exception as e:
-            logger.error(f"Error registering wand: {e}")
-            return False
-
-async def get_wand_users(wand_id: str):
-    """Получение всех пользователей, связанных с палочкой"""
-    async with aiosqlite.connect('flowers.db') as db:
-        cursor = await db.execute(
-            "SELECT user_id, plant_id FROM users_wands WHERE wand_id = ?", 
-            (wand_id,)
-        )
-        return await cursor.fetchall()
-
-async def get_wand_owner(wand_id: str):
-    """Получение владельца палочки по её ID"""
-    async with aiosqlite.connect('flowers.db') as db:
-        cursor = await db.execute(
-            "SELECT user_id FROM users_wands WHERE wand_id = ?", 
-            (wand_id,)
-        )
-        result = await cursor.fetchall()
-        print(f"{result}")
-        return result if result else (None, None)
-
-@start_router.startup()
-async def on_startup():
-    """Starting..."""
-    await init_db()
-
-@start_router.shutdown()
-async def on_shutdown():
-    """Cleaning up before closing..."""
-    await close_db()
-
-def is_valid_mac_address(mac_address: str) -> bool:
-    """Проверяет, является ли строка валидным MAC-адресом"""
-    pattern = r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
-    return re.match(pattern, mac_address) is not None
-
-async def execute_query(query, params=None):
-    """Executing query...х"""
-    global db_connection
-    if db_connection is None:
-        await init_db()
-    
-    try:
-        if params:
-            result = await db_connection.execute(query, params)
-        else:
-            result = await db_connection.execute(query)
-        await db_connection.commit()
-        return result
-    except Exception as e:
-        logger.error(f"Error executing query: {e}")
-        raise
-
-async def get_user_wands(user_id: int):
-    """Получение всех палочек пользователя"""
-    async with aiosqlite.connect('flowers.db') as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute('''
-            SELECT uw.wand_id, uw.plant_id, uw.registered_at, 
-                   COALESCE(pin.plant_name, 'Not linked') as plant_name
-            FROM users_wands uw
-            LEFT JOIN plants_info_new pin ON uw.plant_id = pin.plant_id
-            WHERE uw.user_id = ?
-        ''', (user_id,))
-        wands = await cursor.fetchall()
-        return [dict(wand) for wand in wands]
-
-async def fetch_one(query, params=None):
-    """Fetching from database..."""
-    global db_connection
-    if db_connection is None:
-        await init_db()
-    
-    try:
-        if params:
-            cursor = await db_connection.execute(query, params)
-        else:
-            cursor = await db_connection.execute(query)
-        result = await cursor.fetchone()
-        await cursor.close()
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching data: {e}")
-        raise
-
-# $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
-# DATABASE QUERIES
-
-async def add_user(user_id: int, username: str = None):
-    """Добавление нового пользователя"""
-    async with aiosqlite.connect('flowers.db') as db:
-        await db.execute('''
-            INSERT OR IGNORE INTO users (user_id, username)
-            VALUES (?, ?)
-        ''', (user_id, username))
-        await db.commit()
-
-async def user_exists(user_id: int) -> bool:
-    """Проверка существования пользователя"""
-    async with aiosqlite.connect('flowers.db') as db:
-        cursor = await db.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,))
-        return await cursor.fetchone() is not None
-
-async def add_plant_to_user(user_id: int, plant_id: int):
-    """Добавление растения пользователю"""
-    async with aiosqlite.connect('flowers.db') as db:
-        try:
-            await db.execute('''
-                INSERT INTO user_plants (user_id, plant_id)
-                VALUES (?, ?)
-            ''', (user_id, plant_id))
-            await db.commit()
-            return True
-        except aiosqlite.IntegrityError:
-            # Растение уже добавлено
-            return False
-
-async def get_user_plants(user_id: int):
-    """Получение растений пользователя"""
-    async with aiosqlite.connect('flowers.db') as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute('''
-            SELECT p.*, up.added_at 
-            FROM plants_info_new p
-            JOIN user_plants up ON p.plant_id = up.plant_id
-            WHERE up.user_id = ?
-            ORDER BY up.added_at DESC
-        ''', (user_id,))
-        return await cursor.fetchall()
-
-async def get_plant_by_name(plant_name: str):
-    """Поиск растения по названию"""
-    async with aiosqlite.connect('flowers.db') as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute('''
-            SELECT * FROM plants_info_new WHERE LOWER(plant_name) = LOWER(?)
-        ''', (plant_name,))
-        plant = await cursor.fetchone()
-        return dict(plant) if plant else None
-    
-async def get_plant_by_id(plant_id: int):
-    """Поиск растения по id"""
-    async with aiosqlite.connect('flowers.db') as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute('''
-            SELECT * FROM plants_info_new WHERE LOWER(plant_id) = LOWER(?)
-        ''', (plant_id,))
-        return await cursor.fetchone()
-
-async def search_plants_by_name(plant_name: str):
-    """Поиск растений по частичному совпадению названия"""
-    async with aiosqlite.connect('flowers.db') as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute('''
-            SELECT * FROM plants_info_new WHERE LOWER(plant_name) LIKE LOWER(?)
-        ''', (f'%{plant_name}%',))
-        return await cursor.fetchall()
-    
-async def get_all_plants(): #  -> List[Dict[str, Any]]
-    async with aiosqlite.connect('flowers.db') as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute('SELECT plant_id, plant_name FROM plants_info_new')
-        plants = await cursor.fetchall()
-        return [dict(plant) for plant in plants]
-
-async def get_plant_stats_from_db(user_id: int, plant_id: int, cnt: int=-1):
-    try:
-        async with aiosqlite.connect('flowers.db') as db:
-            query = """
-                SELECT water_lvl, temp_lvl, light_lvl, humidity_lvl, measured_at
-                FROM plants_monitor_final
-                WHERE plant_id = ? AND user_id = ?
-                ORDER BY measured_at
-            """
-            if cnt > 0:
-                query += f"DESC LIMIT {cnt}" # !!!!!!! выдает самую старую запись пока, надо самую новую
-            cursor = await db.execute(query, (plant_id, user_id))  
-            rows = await cursor.fetchall()
-            if not rows:
-                return None
-            df = pd.DataFrame(rows, columns=['water_lvl', 'temp_lvl', 'light_lvl', 'humidity_lvl', 'measured_at'])
-            df['measured_at'] = pd.to_datetime(df['measured_at'])
-            df.set_index('measured_at', inplace=True)
-            
-            # Убеждаемся, что индекс имеет правильный тип
-            if not isinstance(df.index, pd.DatetimeIndex):
-                df.index = pd.to_datetime(df.index)
-            return df
-    except Exception as e:
-        print(f"Error fetching plant stats: {e}")
-        return None
-
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-# MENU FUNCTIONS
-
-def get_main_menu(has_wand: bool = True) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-
-    if has_wand:
-        builder.row(
-            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
-            InlineKeyboardButton(text="❓ What plant am I?", callback_data="start_quiz")
-        )
-        builder.row(
-            InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu"),
-            InlineKeyboardButton(text="📋 My Wands", callback_data="my_wands")
-        )
-    else:
-        builder.row(
-            InlineKeyboardButton(text="🪄 Register Wand", callback_data="register_wand_info")
-        )
-        builder.row(
-            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
-            InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu")
-        )
-    return builder.as_markup()
-
-async def get_user_plants_menu(user_id: int) -> InlineKeyboardMarkup:
-    plants = await get_user_plants(user_id)
-    builder = InlineKeyboardBuilder()
-    
-    for plant in plants:
-        builder.row(
-            InlineKeyboardButton(
-                text=f"🌱 {plant['plant_name']}", 
-                callback_data=f"plant_detail_{plant['plant_id']}"
-            )
-        )
-    builder.row(
-        InlineKeyboardButton(text="⬅️ Back to Main Menu", callback_data="main_menu")
-    )
-    return builder.as_markup()
-    
-async def get_add_plant_menu() -> InlineKeyboardMarkup:
-    plants = await get_all_plants()
-    builder = InlineKeyboardBuilder()
-    
-    for plant in plants:
-        builder.row(
-            InlineKeyboardButton(
-                text=f"➕ {plant['plant_name']}", 
-                callback_data=f"add_plant_{plant['plant_id']}"
-            )
-        )
-    builder.row(
-        InlineKeyboardButton(text="⬅️ Back to Main Menu", callback_data="main_menu")
-    )
-    
-    return builder.as_markup()
-
-def get_plant_actions_menu(user_id: int, plant_id: int = None) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(
-            text="📊 Dashboard", 
-            callback_data=f"stats_all_{user_id}_{plant_id}" if plant_id else "stats_all"
-        ),
-        InlineKeyboardButton(
-            text="📈 Current state", 
-            callback_data=f"stats_now_{user_id}_{plant_id}" if plant_id else "stats_now"
-        )
-    )
-    builder.row(
-        InlineKeyboardButton(
-            text="🌱 Care description", 
-            callback_data=f"care_info_{plant_id}" if plant_id else "care_info"
-        )
-    )
-    builder.row(
-        InlineKeyboardButton(
-            text="⬅️ Back to my plants", 
-            callback_data="my_plants"
-        ),
-        InlineKeyboardButton(
-            text="⬅️ Back to Main Menu", 
-            callback_data="main_menu"
-        )
-    )
-    return builder.as_markup()
-
-def get_time_range_menu(user_id: int, plant_id: int) -> InlineKeyboardMarkup:
-    """
-    Создает меню для выбора временного диапазона графиков
-    """
-    builder = InlineKeyboardBuilder()
-    
-    builder.row(
-        InlineKeyboardButton(text="📊 24 hours", callback_data=f"graph_24h_{user_id}_{plant_id}"),
-        InlineKeyboardButton(text="📈 7 days", callback_data=f"graph_7d_{user_id}_{plant_id}"),
-        InlineKeyboardButton(text="📅 30 days", callback_data=f"graph_30d_{user_id}_{plant_id}")
-    )
-    
-    builder.row(
-        InlineKeyboardButton(text="🕰️ All time", callback_data=f"graph_all_{user_id}_{plant_id}"),
-        InlineKeyboardButton(text="🌿 Auto", callback_data=f"graph_auto_{user_id}_{plant_id}")
-    )
-    
-    builder.row(
-        InlineKeyboardButton(text="⬅️ Back to options", callback_data=f"plant_detail_{plant_id}")
-    )
-    
-    return builder.as_markup()
-
-# ***************************************************************************************************************************************************************************************************************************************
-# STATISTICS HANDLERS
-def format_datetime_axis(ax, timestamps: pd.Series, rotation: int = 45):
-    if timestamps.empty:
-        return
-    
-    time_range = timestamps.max() - timestamps.min()
-    
-    if time_range <= timedelta(hours=12):
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))
-    elif time_range <= timedelta(days=1):
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
-    elif time_range <= timedelta(days=7):
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m %H:%M'))
-        ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
-    elif time_range <= timedelta(days=30):
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m'))
-        ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
-    elif time_range <= timedelta(days=90):
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m'))
-        ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
-    else:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
-    
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=rotation, ha='right')
-
-async def create_time_range_graph(callback: types.CallbackQuery, user_id: int, plant_id: int, time_range: str = 'auto') -> Optional[BytesIO]:
-    """
-    Создает график для определенного временного диапазона
-    
-    Args:
-        time_range: '24h', '7d', '30d', 'all', 'auto'
-    """
-    try:
-        df = await get_plant_stats_from_db(user_id, plant_id)
-        
-        if df is None or df.empty:
-            await callback.message.answer("📊 No statistics data available for this period.", parse_mode=None)
-            return 
-        
-        # Фильтруем данные по временному диапазону
-        now = pd.Timestamp.now()
-        
-        if time_range == '24h':
-            filtered_df = df[df.index >= now - timedelta(hours=24)]
-            title_suffix = ' (24 hours)'
-        elif time_range == '7d':
-            filtered_df = df[df.index >= now - timedelta(days=7)]
-            title_suffix = ' (7 days)'
-        elif time_range == '30d':
-            filtered_df = df[df.index >= now - timedelta(days=30)]
-            title_suffix = ' (30 days)'
-        else:
-            filtered_df = df
-            title_suffix = ' (all time)'
-        
-        if filtered_df.empty:
-            return None
-        
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 10))
-        fig.suptitle(f'Plant Statistics{title_suffix}', fontsize=16)
-        
-        ax1.plot(filtered_df.index, filtered_df['temp_lvl'], marker='o', color="red", linewidth=3)
-        ax1.set_title('Temperature')
-        ax1.set_ylabel('°C')
-        ax1.grid(True, alpha=0.3)
-        
-        ax2.plot(filtered_df.index, filtered_df['water_lvl'], marker='o', color="blue", linewidth=3)
-        ax2.set_title('Soil moisture')
-        ax2.set_ylabel('%')
-        ax2.grid(True, alpha=0.3)
-        
-        ax3.plot(filtered_df.index, filtered_df['light_lvl'], marker='o', color="orange", linewidth=3)
-        ax3.set_title('Light')
-        ax3.set_ylabel('Lux')
-        ax3.grid(True, alpha=0.3)
-        
-        ax4.plot(filtered_df.index, filtered_df['humidity_lvl'], marker='o', color="gray", linewidth=3)
-        ax4.set_title('Air humidity')
-        ax4.set_ylabel('%')
-        ax4.grid(True, alpha=0.3)
-    
-        
-        format_datetime_axis(ax1, pd.Series(filtered_df.index))
-        format_datetime_axis(ax2, pd.Series(filtered_df.index))
-        format_datetime_axis(ax3, pd.Series(filtered_df.index))
-        format_datetime_axis(ax4, pd.Series(filtered_df.index))
-        
-        plt.tight_layout()
-
-        buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-        buf.seek(0)
-        plt.close()
-
-        await bot.send_photo(
-        chat_id=callback.message.chat.id,
-        photo=BufferedInputFile(buf.getvalue(), filename='plant_stats.png'),
-        caption="📊 Detailed plant statistics"
-    )
-        
-    except Exception as e:
-        print(f"Error creating time range graph: {e}")
-        return None
-
-async def user_has_wand(user_id: int) -> bool:
-    """Проверка наличия палочек у пользователя"""
-    async with aiosqlite.connect('flowers.db') as db:
-        cursor = await db.execute(
-            'SELECT 1 FROM users_wands WHERE user_id = ?', 
-            (user_id,)
-        )
-        return await cursor.fetchone() is not None
-
-async def show_current_stats(callback: types.CallbackQuery, user_id: int, plant_id: int):
-    plant = await get_plant_by_id(plant_id)
-    df = await get_plant_stats_from_db(user_id, plant_id, cnt=1)
-
-    if df is None or df.empty:
-        stats_text = "📊 No statistics data available for this plant."
-    else:
-        stats_text = f"""
-        📈 Current state of your {plant['plant_name']}:
-            • Soil moisture level: {df['water_lvl'].values[0]}%
-            • Temperature: {df['temp_lvl'].values[0]}°C
-            • Sunlight: {df['light_lvl'].values[0]} lux
-            • Humidity: {df['humidity_lvl'].values[0]} %
-        """
-    return stats_text
-
-async def show_care_info(plant_id: int):
-    plant = await get_plant_by_id(plant_id)
-    care_text = f"{plant['care_description']}\n\n\t💧 gather watering info and give advice\n☀️ gather watering info and give advice\n🌡️ gather watering info and give advice"
-    return care_text
-
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-# COMMAND HANDLERS
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -593,7 +106,7 @@ async def cmd_start(message: types.Message):
     if not has_wand:
         welcome_text += "\n\n⚠️ Please register your wand first to access all features!"
     
-    await message.answer(welcome_text, reply_markup=get_main_menu(has_wand), parse_mode=None)
+    await message.answer(welcome_text, reply_markup= get_main_menu(has_wand), parse_mode=None)
 
 @dp.message(Command("remove_wand"))
 async def cmd_remove_wand(message: types.Message):
@@ -629,122 +142,8 @@ async def cmd_menu(message: types.Message):
     user_id = message.from_user.id
     if user_id in user_quiz_state:
         del user_quiz_state[user_id]
-    await message.answer("Main menu:", reply_markup=get_main_menu(await user_has_wand(user_id)), parse_mode=None)
-    
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-# CALLBACK QUERIES HANDLERS
+    await message.answer("Main menu:", reply_markup= get_main_menu(await user_has_wand(user_id)), parse_mode=None)
 
-@dp.callback_query()
-async def handle_callback(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    data = callback.data
-    if data == "main_menu":
-        await callback.message.answer("Main menu:", reply_markup=get_main_menu(await user_has_wand(user_id)), parse_mode=None)
-        # await callback.answer()
-    
-    elif data == "my_plants":
-        plants = await get_user_plants(user_id)
-        if plants:
-            text = f"Your plants:\n"
-        else:
-            text = "You don't have any plants yet. Add some from the main menu!"
-        
-        await callback.message.answer(text, reply_markup=await get_user_plants_menu(user_id), parse_mode=None)
-        # await callback.answer()
-    
-    elif data == "add_plant_menu":
-        await callback.message.answer("Choose a plant to add:", reply_markup=await get_add_plant_menu(), parse_mode=None)
-        # await callback.answer()
-    
-    elif data.startswith("add_plant_"):
-        plant_id = int(data.split("_")[2])
-        success = await add_plant_to_user(user_id, plant_id)
-        if success:
-            await callback.message.answer("Plant added successfully! ✅ 🌿", parse_mode=None)
-        else:
-            await callback.message.answer("This plant is already in your collection! ⚠️", parse_mode=None)
-        # await callback.answer()
-    
-    elif data.startswith("plant_detail_"):
-        plant_id = int(data.split("_")[2])
-        plant = await get_plant_by_id(plant_id)
-        if plant:
-            await callback.message.answer("Here are your options: ", reply_markup=get_plant_actions_menu(user_id, plant_id), parse_mode=None)
-        else:
-            await callback.message.answer("Plant not found", parse_mode=None)
-        # await callback.answer()
-
-    elif data.startswith("stats_all_"):
-        plant_id = int(data.split("_")[3])
-        # await show_all_time_stats(callback, user_id, plant_id)
-        await callback.message.answer("Select time period", reply_markup=get_time_range_menu(user_id, plant_id), parse_mode=None)
-        # await callback.answer()
-
-    elif data.startswith("stats_now_"):
-        plant_id = int(data.split("_")[3])
-        stats_text = await show_current_stats(callback, user_id, plant_id)
-        await callback.message.answer(stats_text, reply_markup=get_plant_actions_menu(user_id, plant_id), parse_mode=None)
-        # await callback.answer()
-
-    elif data.startswith("care_info_"):
-        plant_id = int(data.split("_")[2])
-        care_text = await show_care_info(plant_id)
-        await callback.message.answer(care_text, reply_markup=get_plant_actions_menu(user_id, plant_id), parse_mode=None)
-        # await callback.answer()
-
-    elif data == "start_quiz":
-        user_quiz_state[user_id] = {'current_question': 0, 'score': 0}
-        await ask_quiz_question(callback.message, user_id)
-        # await callback.answer()
-    
-    elif data.startswith("quiz_answer_"):
-        if user_id not in user_quiz_state:
-            await callback.answer("Quiz not started")
-            return
-        
-        answer_index = int(data.split("_")[2])
-        current_state = user_quiz_state[user_id]
-        current_question = current_state['current_question']
-        
-        if current_question < len(QUIZ_QUESTIONS):
-            question_data = QUIZ_QUESTIONS[current_question]
-            current_state['score'] += question_data['scores'][answer_index]
-            current_state['current_question'] += 1
-            
-            if current_state['current_question'] < len(QUIZ_QUESTIONS):
-                await ask_quiz_question(callback.message, user_id)
-            else:
-                await show_quiz_results(callback.message, user_id)
-
-    elif  data.startswith("graph_"):
-        plant_id = int(data.split("_")[3])
-        await create_time_range_graph(callback, user_id, plant_id, data.split("_")[1])
-        await callback.message.answer("Other time period?", reply_markup=get_time_range_menu(user_id, plant_id), parse_mode=None)
-
-    elif data == "register_wand_info":
-        user_plants = await get_user_plants(user_id)
-        plants_text = "To register a wand, use the command:\n/register_wand wand_id plant_id\n\n"
-        plants_text += "Your plants:\n"
-        for plant in user_plants:
-            plants_text += f"ID {plant['plant_id']} - {plant['plant_name']}\n"
-            
-        await callback.message.answer(plants_text, parse_mode=None)
-                
-    elif data == "my_wands":
-        wands = await get_user_wands(user_id)
-        if not wands:
-            await callback.message.answer("You don't have any registered wands.", parse_mode=None)
-        else:
-            wands_text = "Your registered wands:\n\n"
-            for wand in wands:
-                registered_date = wand['registered_at'].split()[0]
-                wands_text += (
-                    f"• Wand: {wand['wand_id']}\n"
-                    f"  Plant: {wand['plant_name']} (ID: {wand['plant_id']})\n"
-                    f"  Registered: {registered_date}\n\n"
-                )
-            await callback.message.answer(wands_text, parse_mode=None)
-    await callback.answer()
 
 @dp.message(Command("register_wand"))
 async def cmd_register_wand(message: types.Message):
@@ -808,7 +207,7 @@ async def cmd_register_wand(message: types.Message):
                     "You can link it to a plant later using /link_wand command.",
                     parse_mode=None
                 )
-            await message.answer("Main menu:", reply_markup=get_main_menu(True), parse_mode=None)
+            await message.answer("Main menu:", reply_markup= get_main_menu(True), parse_mode=None)
         else:
             await message.answer("❌ Error registering the wand.", parse_mode=None)
     except ValueError as e:
@@ -877,131 +276,3 @@ async def cmd_my_wands(message: types.Message):
         )
     
     await message.answer(wands_text, parse_mode=None)
-
-
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-# QUIZ HANDLERS
-async def ask_quiz_question(message: types.Message, user_id: int):
-    current_state = user_quiz_state[user_id]
-    question_index = current_state['current_question']
-    question_data = QUIZ_QUESTIONS[question_index]
-    
-    builder = InlineKeyboardBuilder()
-    for i, option in enumerate(question_data['options']):
-        builder.row(InlineKeyboardButton(text=option, callback_data=f"quiz_answer_{i}"))
-    
-    builder.row(InlineKeyboardButton(text="❌ Cancel Quiz", callback_data="main_menu"))
-    
-    await message.answer(
-        f"Question {question_index + 1}/{len(QUIZ_QUESTIONS)}:\n\n{question_data['question']}",
-        reply_markup=builder.as_markup()
-    )
-
-async def show_quiz_results(message: types.Message, user_id: int):
-    score = user_quiz_state[user_id]['score']
-    
-    recommendation = ('Cactus', 'minimal care, lots of sun.')
-    for score_range, rec in PLANT_RECOMMENDATIONS.items():
-        if score_range[0] <= score <= score_range[1]:
-            recommendation = rec
-            break
-    plant = await get_plant_by_name(recommendation[0])
-    text = f"""
-        🎉 Quiz Completed!\n🌿 Recommended plant for you: {': '.join(recommendation[:2])}\n{plant['care_description']}\n
-        Would you like to add this plant to your collection?
-    """
-    rec_plant = await get_plant_by_name(recommendation[0])
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="✅ Add to My Plants", callback_data=f"add_plant_{rec_plant['plant_id']}"),
-        InlineKeyboardButton(text="⬅️ Back to Menu", callback_data="main_menu")
-    )
-    
-    await bot.send_photo(chat_id=user_id, photo=recommendation[2], caption=text, reply_markup=builder.as_markup())
-    # await message.answer(text, reply_markup=builder.as_markup())
-    
-    if user_id in user_quiz_state:
-        del user_quiz_state[user_id]
-
-QUIZ_QUESTIONS = [
-    {
-        'question': "What's your plant care style?",
-        'options': ['🌵 Minimal, I almost never water', '🌿 Sometimes I forget, but I try', '🌸 I love caring, I check every detail'],
-        'scores': [1, 2, 3]
-    },
-    {
-        'question': "What's the usual temperature at home?",
-        'options': ['☀️ Hot, above 24°C', '🌤 Moderate, 20-24°C ', '❄️ Cool, below 20°C'],
-        'scores': [1, 2, 3]
-    },
-    {
-        'question': "What kind of light do you have?",
-        'options': ['🌞 Very bright, direct sunlight', '🌥 Medium, soft light', '🌑 Shade or artificial light '],
-        'scores': [1, 2, 3]
-    },
-    {
-        'question': "How do you feel about humidity?",
-        'options': ['💨 I like dry air', "💧 I'm fine with medium humidity", "🌊 I prefer when it's humid and fresh"],
-        'scores': [1, 2, 3]
-    },
-    {
-        'question': "Why do you want a plant?",
-        'options': ['😎 Just to look nice without much care', '🏡 For coziness and greenery', '💖 To care for it like a “green friend”'],
-        'scores': [1, 2, 3]
-    }
-]
-
-PLANT_RECOMMENDATIONS = {
-    (5, 6): ('Cactus', 'minimal care, lots of sun.', 'https://shorturl.at/L4sbi'),
-    (7, 8): ('Ficus', 'universal, loves balance.', 'https://shorturl.at/7d8je'),
-    (9, 10): ('Monstera', 'needs more moisture and some care.', 'https://tinyurl.com/55w83a8r'),
-    (11, 12): ('Dieffenbachia', 'warm, humid, cozy place.', 'https://tinyurl.com/232ew2x4' ),
-    (13, 15): ('Orchid', 'demanding but very beautiful.', 'https://tinyurl.com/2csh8xje')
-}
-
-## 🇷🇺 Русская версия
-
-# ### ❓ Вопросы
-
-# 1. Какой у тебя стиль ухода за растениями?
-
-# * 🌵 Минимальный, почти не поливаю (1)
-# * 🌿 Иногда забываю, но стараюсь (2)
-# * 🌸 Люблю ухаживать, слежу за каждой деталью (3)
-
-# 2. Какая температура в твоём доме чаще всего?
-
-# * ☀️ Жарко, выше 24°C (1)
-# * 🌤 Умеренно, 20–24°C (2)
-# * ❄️ Прохладно, ниже 20°C (3)
-
-# 3. Какое освещение в твоей комнате?
-
-# * 🌞 Очень яркое, прямое солнце (1)
-# * 🌥 Среднее, рассеянный свет (2)
-# * 🌑 Тень или искусственный свет (3)
-
-# 4. Как ты относишься к влажности?
-
-# * 💨 Люблю сухой воздух (1)
-# * 💧 Нормально к средней влажности (2)
-# * 🌊 Нравится, когда влажно и свежо (3)
-
-# 5. Для чего ты заводишь растение?
-
-# * 😎 Чтобы просто стояло красиво, без забот (1)
-# * 🏡 Для уюта и зелени (2)
-# * 💖 Хочу заботиться, как о «зелёном друге» (3)
-
-# ---
-
-# ### 🌺 Результаты
-
-# * 5–6 баллов → 🌵 Кактус: минимальный уход, много солнца.
-# * 7–8 баллов → 🌿 Фикус: универсальный, любит баланс.
-# * 9–10 баллов → 🌱 Монстера: нужна влага и лёгкий уход.
-# * 11–12 баллов → 🍃 Диффенбахия: тёплый, влажный и уютный уголок.
-# * 13–15 баллов → 🌸 Орхидея: капризная, но очень красивая.
-
-# ---
-

@@ -2,7 +2,7 @@ import os
 import asyncio
 from create_bot import bot, dp
 from handlers.start import start_router
-from handlers.notifications import check_plant_conditions_by_mac  # Импортируем нужную функцию
+from handlers.notifications import check_plant_conditions_by_mac  
 import threading
 from flask import Flask, request
 from flask_sqlalchemy import SQLAlchemy
