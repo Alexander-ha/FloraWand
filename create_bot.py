@@ -12,6 +12,6 @@ admins = [int(admin_id) for admin_id in config('ADMINS').split(',')]
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-bot = Bot(token="7711178429:AAFg5V0lQULZlNaWoesvryMF5m8mS5ULKiY", default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+bot = Bot(token=config('TOKEN'), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
 dp = Dispatcher(storage=MemoryStorage())
