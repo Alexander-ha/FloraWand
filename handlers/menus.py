@@ -3,6 +3,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from create_bot import bot, dp
 from aiogram import types
+from queue import Queue
+from threading import Thread
+
 
 from handlers.quiz import *
 from handlers.menus import *
@@ -11,6 +14,34 @@ from create_bot import bot, dp
 from handlers.statistics import *
 
 logger = logging.getLogger(__name__)
+
+def watering_menu(has_wand: bool = True, notify_on: bool = True) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    builder.row(
+            InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu"),
+            InlineKeyboardButton(text="❓ What plant am I?", callback_data="start_quiz")
+        )
+    if has_wand:
+        builder.row(
+            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
+            InlineKeyboardButton(text="📋 My Wands", callback_data="my_wands")
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
+            InlineKeyboardButton(text="🪄 Register Wand", callback_data="register_wand_info")
+        )
+        builder.row(
+            InlineKeyboardButton(text="💦 Water my plants", callback_data="water_callback"),
+        )
+    if notify_on:
+        builder.row(InlineKeyboardButton(text="📴 Alerts OFF", callback_data="notify_on_off"))
+    else:
+        builder.row(InlineKeyboardButton(text="📳 Alerts ON", callback_data="notify_on_off"))
+
+    return builder.as_markup()
+
 
 def get_main_menu(has_wand: bool = True, notify_on: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -54,6 +85,8 @@ async def get_wand_plants_menu(user_id: int, wand_id: str) -> InlineKeyboardMark
         )
     )
     return builder.as_markup()
+
+
 async def get_wand_users_menu(user_id: int, wand_id: str) -> InlineKeyboardMarkup:
     users = await get_wand_users(wand_id)  
     builder = InlineKeyboardBuilder()
@@ -254,6 +287,9 @@ async def handle_callback(callback: types.CallbackQuery):
     
     elif data == "add_plant_menu":
         await callback.message.answer("Choose a plant to add:", reply_markup=await get_add_plant_menu(), parse_mode=None)
+
+    elif data == "water_callback":
+
     
     elif data.startswith("add_plant_"):
         plant_id = int(data.split("_")[2])
