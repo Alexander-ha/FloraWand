@@ -143,5 +143,5 @@ async def show_current_stats(callback: types.CallbackQuery, user_id: int, plant_
 
 async def show_care_info(plant_id: int):
     plant = await get_plant_by_id(plant_id)
-    care_text = f"{plant['care_description']}\n\n\t💧 gather watering info and give advice\n☀️ gather watering info and give advice\n🌡️ gather watering info and give advice"
+    care_text = plant['care_description']
     return care_text
