@@ -2,7 +2,7 @@ import aiosqlite
 from create_bot import bot, logger
 from datetime import datetime, timedelta
 from handlers.db_queries import get_wand_users, user_has_wand, is_notify_on
-from handlers.menus import get_main_menu
+from handlers.menus import get_main_menu, watering_menu
 
 async def check_plant_conditions_by_mac(mac_address: str):
     """
@@ -139,14 +139,13 @@ async def send_alerts_to_user(user_id, alerts, plant_id):
             
             alert_text = "\n".join(alerts)
             full_message = f"⚠️ **Alert for {plant_name}!**\n\n{alert_text}"
-            
             await bot.send_message(
                 chat_id=user_id,
                 text=full_message,
                 parse_mode="Markdown",
-                reply_markup=get_main_menu(await user_has_wand(user_id), await is_notify_on(user_id))
+                reply_markup=watering_menu(await user_has_wand(user_id), await is_notify_on(user_id))
             )
-            
+
             logger.info(f"Alerts sent to user {user_id} for plant {plant_id}")
         
     except Exception as e:

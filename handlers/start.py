@@ -193,7 +193,8 @@ async def cmd_register_wand(message: types.Message):
     wand_id = parts[1]
     
     # Проверяем формат MAC-адреса
-    if not is_valid_mac_address(wand_id):
+    valid = await is_valid_mac_address(wand_id)
+    if not valid:
         await message.answer(
             "Invalid MAC address format. Please use format like: 30:83:98:B2:D4:0D\n"
             "The MAC address should contain 6 pairs of hex digits separated by colons or hyphens.",

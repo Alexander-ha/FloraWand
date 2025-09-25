@@ -3,6 +3,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from create_bot import bot, dp
 from aiogram import types
+from aiogram import Router, types
+import shared_vars
+from queue import Queue
+from threading import Thread
+
 
 from handlers.quiz import *
 from handlers.menus import *
@@ -10,7 +15,43 @@ from handlers.db_queries import *
 from create_bot import bot, dp
 from handlers.statistics import *
 
+menus_router = Router()
+
+
+SENTINEL = object()
+
+
 logger = logging.getLogger(__name__)
+
+def watering_menu(has_wand: bool = True, notify_on: bool = True) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    builder.row(
+            InlineKeyboardButton(text="➕ Add Plant", callback_data="add_plant_menu"),
+            InlineKeyboardButton(text="❓ What plant am I?", callback_data="start_quiz")
+        )
+    if has_wand:
+        builder.row(
+            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
+            InlineKeyboardButton(text="📋 My Wands", callback_data="my_wands")
+        )
+
+    else:
+        builder.row(
+            InlineKeyboardButton(text="🌿 My Plants", callback_data="my_plants"),
+            InlineKeyboardButton(text="🪄 Register Wand", callback_data="register_wand_info")
+        )
+    builder.row(
+            InlineKeyboardButton(text="💦 Water my plants", callback_data="water_callback"),
+        )
+
+    if notify_on:
+        builder.row(InlineKeyboardButton(text="📴 Alerts OFF", callback_data="notify_on_off"))
+    else:
+        builder.row(InlineKeyboardButton(text="📳 Alerts ON", callback_data="notify_on_off"))
+
+    return builder.as_markup()
+
 
 def get_main_menu(has_wand: bool = True, notify_on: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -54,6 +95,8 @@ async def get_wand_plants_menu(user_id: int, wand_id: str) -> InlineKeyboardMark
         )
     )
     return builder.as_markup()
+
+
 async def get_wand_users_menu(user_id: int, wand_id: str) -> InlineKeyboardMarkup:
     users = await get_wand_users(wand_id)  
     builder = InlineKeyboardBuilder()
@@ -247,7 +290,7 @@ async def get_wands(user_id: int) -> InlineKeyboardMarkup:
     
     return builder.as_markup()
 
-@dp.callback_query()
+@menus_router.callback_query()
 async def handle_callback(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     data = callback.data
@@ -265,6 +308,21 @@ async def handle_callback(callback: types.CallbackQuery):
     
     elif data == "add_plant_menu":
         await callback.message.answer("Choose a plant to add:", reply_markup=await get_add_plant_menu(), parse_mode=None)
+
+    elif data == "water_callback":
+        message = {"user_id": user_id, "command": "water"}
+        logger.info(f"User {user_id} pressed water button, sending message to pipeline: {message}")
+        try:
+            if shared_vars.bot_pipeline:
+                await shared_vars.bot_pipeline.set_message(message, "Producer")
+                logger.info(f"Message {message} successfully sent to pipeline by user {user_id}")
+                await callback.answer("Watering command sent! 💦")
+            else:
+                logger.error("bot_pipeline is not initialized")
+                await callback.answer("System error: pipeline not available ❌")
+        except Exception as e:
+            logger.error(f"Error sending message to pipeline: {e}")
+            await callback.answer("Error sending command ❌")
     
     elif data.startswith("add_plant_"):
         plant_id = int(data.split("_")[2])
