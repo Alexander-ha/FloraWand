@@ -72,16 +72,26 @@ async def init_db():
         ''')
 
         # care_description = [
-        #     "\n🌱 Dieffenbachia — a decorative tropical plant with large variegated leaves in green and cream patterns.\n👉 Keep it in bright, indirect light, water regularly, and avoid cold drafts.",
-        #     "\n🌵 Cactus — a slow-growing succulent with spines that stores water in its stem.\n👉 Keep it in bright sunlight and water only when the soil is completely dry.",
-        #     "\n🌿 Ficus — an evergreen tree with elegant drooping branches and glossy leaves.\n👉 Place it in bright, indirect light and avoid sudden changes in conditions to prevent leaf drop.",
-        #     "\n🍃 Monstera — a tropical climbing plant with large leaves featuring iconic splits and holes.\n👉 Water moderately and provide partial shade to protect it from direct sunburn.",
-        #     "\n🌸 Orchid — a delicate orchid known as the “dancing lady” for its clusters of small, fluttering flowers.\n👉 Give it bright, filtered light, water when the top of the potting mix is dry, and ensure good air circulation."]
+        #     "🌱 Dieffenbachia — a decorative tropical plant with large variegated leaves in green and cream patterns.\n👉 Keep it in bright, indirect light, water regularly, and avoid cold drafts.",
+        #     "🌵 Cactus — a slow-growing succulent with spines that stores water in its stem.\n👉 Keep it in bright sunlight and water only when the soil is completely dry.",
+        #     "🌿 Ficus — an evergreen tree with elegant drooping branches and glossy leaves.\n👉 Place it in bright, indirect light and avoid sudden changes in conditions to prevent leaf drop.",
+        #     "🍃 Monstera — a tropical climbing plant with large leaves featuring iconic splits and holes.\n👉 Water moderately and provide partial shade to protect it from direct sunburn.",
+        #     "🌸 Orchid — a delicate orchid known as the “dancing lady” for its clusters of small, fluttering flowers.\n👉 Give it bright, filtered light, water when the top of the potting mix is dry, and ensure good air circulation."]
+        
         # for i, plant in enumerate(care_description):
         #     query = f'''
         #         UPDATE plants_info_new SET care_description = ? WHERE plant_id = ?
         #     '''
-        #     await db_connection.execute(query, (plant, i+1))
+        #     await db.execute(query, (plant, i+1))
+
+        # veggies_care_desc = ["🥒 Cucumber — vining vegetable with crisp fruits; loves warmth, moisture, and lots of light.\n👉 Keep soil consistently moist (but not waterlogged), provide plenty of air circulation to prevent fungal diseases, and support vines (trellis) so fruits don’t touch soil. Use full sun or strong grow lights especially in less sunny periods.", 
+        #                      "🍅 Tomato — fruiting plant needing good day-night temperature difference for best yields.\n👉 Ensure warm days and cooler nights (but not too cold), remove lower leaves for airflow, stake or cage the plants so branches don’t break, and feed with fertilizer especially when flowering begins. Avoid letting soil dry out.",
+        #                      "🌶 Pepper — loves heat; sensitive to cold dips.\n👉 Keep night temperatures above ~18-20°C, avoid cold drafts; use mulch to conserve soil moisture and warmth; ensure good light especially during fruiting; pick off early blossoms if plant is too small or weak to support fruit to focus energy on vegetative growth first."]
+
+        # query = "insert into plants_info_new (plant_name, care_description, light_low, light_high, temp_low, temp_high, water_low, water_high, humid_low, humid_high) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        # await db.execute(query, ("Cucumber", veggies_care_desc[0], 5000, 12000, 20, 26, 60, 80, 60, 75 ))
+        # await db.execute(query, ("Tomato", veggies_care_desc[1],  6000, 15000, 18, 25, 55, 75, 55, 70 ))
+        # await db.execute(query, ("Pepper", veggies_care_desc[2], 4000, 10000, 20, 28, 60, 75, 60, 70 ))
         await db.commit()
         logger.info("Database initiated.")
 
