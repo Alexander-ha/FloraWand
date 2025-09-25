@@ -92,6 +92,10 @@ async def init_db():
         # await db.execute(query, ("Cucumber", veggies_care_desc[0], 5000, 12000, 20, 26, 60, 80, 60, 75 ))
         # await db.execute(query, ("Tomato", veggies_care_desc[1],  6000, 15000, 18, 25, 55, 75, 55, 70 ))
         # await db.execute(query, ("Pepper", veggies_care_desc[2], 4000, 10000, 20, 28, 60, 75, 60, 70 ))
+
+        # care_desc = '''🌺 Kalanchoe — a drought-tolerant succulent known for its vibrant, long-lasting blooms.\n👉 The golden rule is: "When in doubt, don't water." Provide as much bright, direct light as possible. To encourage re-blooming, the plant needs a period of "short days". Provide 14-16 hours of complete darkness daily for 6 weeks.'''
+        # query = "insert into plants_info_new (plant_name, care_description, light_low, light_high, temp_low, temp_high, water_low, water_high, humid_low, humid_high) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        # await db.execute(query, ("Kalanchoe", care_desc, 10000, 20000, 18, 24, 20, 40, 30, 50 ))
         await db.commit()
         logger.info("Database initiated.")
 
