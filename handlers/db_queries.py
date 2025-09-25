@@ -94,7 +94,7 @@ async def register_user_wand(user_id: int, wand_id: str, plant_id: int = None):
             )
             existing = await cursor.fetchone()
             
-            if existing:
+            if existing and plant_id is not None:
                 await db.execute(
                     "UPDATE users_wands SET plant_id = ? WHERE user_id = ? AND wand_id = ?",
                     (plant_id, user_id, wand_id)

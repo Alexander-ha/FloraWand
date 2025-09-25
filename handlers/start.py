@@ -100,12 +100,8 @@ async def init_db():
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user = message.from_user
-    await add_user(user.id, user.username)
-    has_wand = await user_has_wand(user.id)
-    notify_on = await is_notify_on(user.id)
-
     welcome_text = f"""
-    🌿 Welcome to Flora Wand Bot, {user.first_name}!
+    🌿 Welcome back to Flora Wand Bot, {user.first_name}!
 
     I can help you:
     • Add plants to your collection
@@ -113,9 +109,27 @@ async def cmd_start(message: types.Message):
     • Get care instructions
     • Find the perfect plant for you
     """
-    
+
+    await add_user(user.id, user.username)
+    has_wand = await user_has_wand(user.id)
     if not has_wand:
-        welcome_text += "\n\n⚠️ Please register your wand first to access all features!"
+        welcome_text = f"""
+        🌿 Welcome to Flora Wand Bot, {user.first_name}!
+
+        I can help you:
+        • Add plants to your collection
+        • Monitor water, light, humidity and room temperature levels
+        • Get care instructions
+        • Find the perfect plant for you
+        """
+        welcome_text += '\n\n🔮➕ You have a new wand! Check out "My Wands" menu.'
+        await register_user_wand(user.id, "30:83:98:B2:D4:0D")
+
+    has_wand = await user_has_wand(user.id)
+    notify_on = await is_notify_on(user.id)
+
+    # if not has_wand:
+        # welcome_text += "\n\n⚠️ Please register your wand first to access all features!"
     
     await message.answer(welcome_text, reply_markup= get_main_menu(has_wand, notify_on), parse_mode=None)
 
