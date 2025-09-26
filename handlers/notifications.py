@@ -177,7 +177,8 @@ async def check_all_plants_conditions():
                     FROM plants_monitor_final 
                     GROUP BY plant_id, user_id
                 ) latest ON pmf.plant_id = latest.plant_id AND pmf.user_id = latest.user_id AND pmf.measured_at = latest.latest_time
-                JOIN plants_info_new pin ON pmf.plant_id = pin.plant_id
+                INNER JOIN plants_info_new pin ON pmf.plant_id = pin.plant_id
+                INNER JOIN users_wands uw ON pmf.user_id = uw.user_id AND pmf.plant_id = uw.plant_id
             """)
             
             plants_data = await cursor.fetchall()
