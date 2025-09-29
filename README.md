@@ -4,6 +4,10 @@
 
 Consists of aiogram3 python bot, sqlite3 async implementation, main purpose is the personalization of user's experience.
 
+Uses http protocols to communicate between ESP12F (8266) and server. Might be deployed in your own architecture. Docker support is also applicable.
+
+
+
 Current purposes:
 1. Database for 5 flowers of diefenbachia aglaonema (reference values)
 2. Branched question on ifs
